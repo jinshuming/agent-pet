@@ -106,7 +106,7 @@ Claude Code 和 Codex 可以同时用，它们驱动的是同一只宠物；几�
 在宠物身上点右键：
 
 - **切换角色**：内置 8 个角色（Asian Actor、Man in Suit、Young Man、DJ Neko、Chibi Guitarist、Satoru Gojo、Creepy Log Man、Miles Morales）。
-- **大小**：10%–250% 的预设，或者「自定义…」输入任意百分比（最大值取决于屏幕高度）。
+- **大小**：默认 75%。可以选 10%–250% 的预设，或者「自定义…」输入任意百分比（最大值取决于屏幕高度）。
 - **模拟 Agent 状态 / 模拟互动 / 预览单个动作**：不用等 agent，直接看各种状态和动作，包括「休息：走到墙边坐下 / 靠墙睡着」。
 - **退出**。
 

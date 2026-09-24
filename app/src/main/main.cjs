@@ -98,8 +98,10 @@ function saveSettings(patch) {
   }
 }
 
-const clampScale = (s) => Math.min(SCALE_MAX, Math.max(SCALE_MIN, Number(s) || 1));
-let scale = clampScale(loadSettings().scale ?? 1);
+/** Size on first launch, until the user picks one (then settings.json remembers it). */
+const DEFAULT_SCALE = 0.75;
+const clampScale = (s) => Math.min(SCALE_MAX, Math.max(SCALE_MIN, Number(s) || DEFAULT_SCALE));
+let scale = clampScale(loadSettings().scale ?? DEFAULT_SCALE);
 let saveTimer = null;
 
 /** The window's size at the current scale. */
