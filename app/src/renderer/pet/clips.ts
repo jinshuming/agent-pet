@@ -47,6 +47,27 @@ export const CLIP_FILES = {
   sitDoze: 'motions/sit-doze.glb',
   sitSleep: 'motions/sit-sleep.glb',
   standUp: 'motions/stand-up.glb',
+  // * generated (bored while idle: the longer nobody gives him work, the more he fidgets)
+  scratchHead: 'motions/idle-scratch-head.glb',
+  scratchItch: 'motions/idle-scratch-itch.glb',
+  kickPebble: 'motions/idle-kick-pebble.glb',
+  yawn: 'motions/idle-yawn.glb',
+  checkWatch: 'motions/idle-check-watch.glb',
+  tapFoot: 'motions/idle-tap-foot.glb',
+  // * generated (acting out the agent's work)
+  accept: 'motions/task-accept.glb',
+  thinkScratch: 'motions/think-scratch.glb',
+  thinkCount: 'motions/think-count.glb',
+  read: 'motions/work-read.glb',
+  search: 'motions/work-search.glb',
+  run: 'motions/work-run.glb',
+  tidy: 'motions/work-tidy.glb',
+  dispatch: 'motions/agent-dispatch.glb',
+  supervise: 'motions/agent-supervise.glb',
+  report: 'motions/agent-report.glb', // library Nod Yes
+  // * generated (waiting on you, more and more insistently)
+  urgent: 'motions/permission-urgent.glb',
+  knock: 'motions/permission-knock.glb',
 } as const;
 
 export type ClipName = keyof typeof CLIP_FILES;
@@ -88,12 +109,62 @@ export const CLIP_LABELS: Record<ClipName, string> = {
   sitDoze: '✨ 坐着犯困',
   sitSleep: '✨ 靠墙睡着',
   standUp: '✨ 靠墙站起来',
+  scratchHead: '✨ 无聊挠头',
+  scratchItch: '✨ 挠痒痒',
+  kickPebble: '✨ 踢小石子',
+  yawn: '✨ 打哈欠',
+  checkWatch: '✨ 看表·有活吗',
+  tapFoot: '✨ 抱臂抖腿',
+  accept: '✨ 接到任务·撸袖子',
+  thinkScratch: '✨ 挠头苦想',
+  thinkCount: '✨ 掰手指列计划',
+  read: '✨ 读文件',
+  search: '✨ 手搭凉棚找东西',
+  run: '✨ 按按钮·盯着跑',
+  tidy: '✨ 整理文件',
+  dispatch: '✨ 派出子 Agent',
+  supervise: '✨ 叉腰看团队干活',
+  report: '点头·收到汇报',
+  urgent: '✨ 挥手喊你',
+  knock: '✨ 敲屏幕',
 };
 
 /** One step of a motion sequence. Non-looping steps advance when the clip finishes. */
 export type Step = { clip: ClipName; loop: boolean };
 
 export type AgentState = 'greet' | 'idle' | 'thinking' | 'working' | 'permission' | 'done' | 'error' | 'sleep';
+
+/** What kind of work the agent is doing (from the tool it runs; see toolActivity in agent-sessions.cjs). */
+export type Activity = 'edit' | 'read' | 'search' | 'run' | 'web' | 'agent' | 'mcp' | 'other' | 'tidy';
+
+/** Working, acted out by kind of tool: typing for edits, a tablet for reads, scanning for searches… */
+export const ACTIVITY_CLIPS: Record<Activity, ClipName> = {
+  edit: 'typing',
+  read: 'read',
+  search: 'search',
+  web: 'search',
+  run: 'run',
+  mcp: 'run',
+  agent: 'supervise', // after sending them off with `dispatch`
+  tidy: 'tidy', // compacting the context
+  other: 'typing',
+};
+/** Thinking for a while: he switches between ways of thinking every THINK_VARY_MS. */
+export const THINK_CLIPS: ClipName[] = ['think', 'thinkScratch', 'thinkCount'];
+export const THINK_VARY_MS = { min: 9_000, max: 15_000 };
+/** A busy motion plays at least this long before the next tool may change it (tools come in bursts). */
+export const BUSY_DWELL_MS = 2_500;
+
+/**
+ * Waiting on you (a permission prompt or a question): polite at first, then waving,
+ * then knocking on the screen. After the last stage he alternates the last two.
+ */
+export const PERMISSION_STAGES: { afterMs: number; clip: ClipName }[] = [
+  { afterMs: 0, clip: 'plead' },
+  { afterMs: 12_000, clip: 'urgent' },
+  { afterMs: 35_000, clip: 'knock' },
+];
+export const PERMISSION_ALTERNATE_MS = 14_000;
 
 /** States in which the pet is "busy": clicks get the impatient "wait a moment" reaction. */
 export const BUSY: ReadonlySet<AgentState> = new Set(['thinking', 'working']);
@@ -116,7 +187,11 @@ export const AGENT_SEQUENCES: Record<AgentState, Step[]> = {
     { clip: 'proud', loop: false },
   ],
   error: [{ clip: 'frustrated', loop: false }],
-  sleep: [{ clip: 'doze', loop: true }],
+  // Every session quiet for SLEEP_AFTER_MS: a yawn, then he goes off to nap against a wall (REST_SLEEPY_MS).
+  sleep: [
+    { clip: 'yawn', loop: false },
+    { clip: 'breathe', loop: true },
+  ],
 };
 
 export type Reaction = 'busyPoke' | 'headPat' | 'poke' | 'doubleClick' | 'petted' | 'drop' | 'dizzy';
@@ -177,6 +252,8 @@ export const CLIP_FALLBACK: Partial<Record<ClipName, ClipName>> = {
  * Both count from the last time you touched him or the agent was busy.
  */
 export const REST_MS = { sit: 3 * 60_000, sleep: 8 * 60_000 };
+/** Once every agent has gone quiet (the `sleep` state) he's drowsy: he sits and nods off much sooner. */
+export const REST_SLEEPY_MS = { sit: 30_000, sleep: 60_000 };
 /** How fast the walk clip travelled before make-in-place removed it: the window moves at this. */
 export const WALK_SPEED_MPS = 1.552;
 /** Walking: side-on. Sitting: back to the wall but turned toward you, so you still see his face. */
@@ -191,9 +268,39 @@ export const LEAN_CLIPS: Record<Wall, { enter: ClipName; hold: ClipName }> = {
   right: { enter: 'leanInRight', hold: 'leanRight' },
 };
 
-/** While idle, one of these plays every IDLE_FIDGET_MS so he never stands frozen. */
-export const IDLE_FIDGETS: { steps: Step[]; lines: string[] }[] = [
-  { steps: [{ clip: 'fidgetHair', loop: false }], lines: ['（整理一下发型）', '帅吗？', ''] },
-  { steps: [{ clip: 'fidgetStretch', loop: false }], lines: ['伸个懒腰～', '你在忙什么呀？', ''] },
+export type Fidget = { clip: ClipName; lines: string[] };
+/**
+ * Idle with no task: he gets more and more bored. Each tier starts `afterMs` into the
+ * wait and plays one of its fidgets every `every` ms. After REST_MS.sit he gives up and
+ * goes to sit against a wall.
+ */
+export const BOREDOM: { afterMs: number; every: { min: number; max: number }; fidgets: Fidget[] }[] = [
+  {
+    afterMs: 0,
+    every: { min: 12_000, max: 25_000 },
+    fidgets: [
+      { clip: 'fidgetHair', lines: ['（整理一下发型）', '帅吗？', ''] },
+      { clip: 'fidgetStretch', lines: ['伸个懒腰～', '你在忙什么呀？', ''] },
+    ],
+  },
+  {
+    afterMs: 40_000,
+    every: { min: 10_000, max: 20_000 },
+    fidgets: [
+      { clip: 'scratchHead', lines: ['嗯…干点什么好呢', '好无聊呀～', ''] },
+      { clip: 'scratchItch', lines: ['（挠挠）', '哪里痒…', ''] },
+      { clip: 'kickPebble', lines: ['（踢石子）', '有活儿吗？', ''] },
+      { clip: 'fidgetStretch', lines: ['伸个懒腰～', ''] },
+    ],
+  },
+  {
+    afterMs: 100_000,
+    every: { min: 9_000, max: 16_000 },
+    fidgets: [
+      { clip: 'yawn', lines: ['哈啊～好困', '（打哈欠）'] },
+      { clip: 'checkWatch', lines: ['派个任务给我呗', '还没有活儿吗…'] },
+      { clip: 'tapFoot', lines: ['等得花儿都谢了…', '（抖腿）', ''] },
+      { clip: 'scratchHead', lines: ['好无聊呀～', ''] },
+    ],
+  },
 ];
-export const IDLE_FIDGET_MS = { min: 15_000, max: 35_000 };

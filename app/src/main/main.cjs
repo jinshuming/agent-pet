@@ -56,7 +56,7 @@ const MAX_BODY_BYTES = 16 * 1024;
 
 let win = null;
 /** Latest view pushed to the renderer, replayed after a reload. Starts with a hello. */
-let currentView = { state: 'greet', settle: 'idle', label: '' };
+let currentView = { state: 'greet', settle: 'idle', label: '', activity: null, team: [] };
 
 function pushView(view) {
   currentView = view;
@@ -65,6 +65,8 @@ function pushView(view) {
 
 /** Dev only (/debug/pin-state): hold the pet in one agent state while other sessions keep reporting. */
 let pinnedUntil = 0;
+/** Dev only (/debug/cursor): where the pet thinks the cursor is (window coordinates), until `until`. */
+let cursorOverride = { x: 0, y: 0, until: 0 };
 
 const sessions = new AgentSessions((view) => {
   if (VERBOSE) console.log(`[agent] ${view.state}${view.settle !== view.state ? ` → ${view.settle}` : ''} ${view.label}`);
@@ -256,8 +258,8 @@ function createWindow() {
   // even when the cursor is outside the window.
   const timer = setInterval(() => {
     if (!win || win.isDestroyed()) return;
-    const c = screen.getCursorScreenPoint();
     const b = win.getBounds();
+    const c = Date.now() < cursorOverride.until ? { x: b.x + cursorOverride.x, y: b.y + cursorOverride.y } : screen.getCursorScreenPoint();
     win.webContents.send('pet:cursor', { x: c.x - b.x, y: c.y - b.y, w: b.width, h: b.height });
   }, CURSOR_POLL_MS);
   win.on('closed', () => {
@@ -557,6 +559,7 @@ ipcMain.on('pet:show-menu', (_e, catalog = {}) => {
 //   POST /debug/fling {"vx":1500,"vy":-2500,"x"?,"y"?}  (dev only: like releasing a drag at that velocity)
 //   POST /debug/snapshot?path=/abs/file.png  (dev only: saves the pet window as PNG)
 //   GET  /debug/extents                       (dev only: plays every clip, reports how far it reaches)
+//   POST /debug/cursor {"x":0,"y":0,"ms":5000} (dev only: pretend the cursor is there, in window coordinates)
 //
 // Only local processes (the hook, curl) may call it, never a web page: any site
 // can fire requests at 127.0.0.1. See isFromBrowser().
@@ -708,6 +711,18 @@ function startControlServer() {
     }
 
     // {"x":400,"y":200}: put the window there (to test walking, leaning, hanging from anywhere).
+    if (process.env.PET_DEV_URL && req.method === 'POST' && url.pathname === '/debug/cursor') {
+      let body;
+      try {
+        body = await readJson(req);
+      } catch (err) {
+        return reply(400, { error: err.message });
+      }
+      const ms = Math.min(10 * 60_000, Math.max(0, Number(body?.ms) || 0));
+      cursorOverride = { x: Number(body?.x) || 0, y: Number(body?.y) || 0, until: Date.now() + ms };
+      return reply(200, { ok: true });
+    }
+
     if (process.env.PET_DEV_URL && req.method === 'POST' && url.pathname === '/debug/move') {
       let body;
       try {
@@ -721,6 +736,7 @@ function startControlServer() {
     }
 
     // {"state":"idle","ms":60000}: show this state and ignore live sessions for ms (0 = unpin).
+    // Optional "label", "activity" and "team" (see AgentSessions.view) fake the rest of the view.
     if (VERBOSE && req.method === 'POST' && url.pathname === '/debug/pin-state') {
       let body;
       try {
@@ -730,9 +746,25 @@ function startControlServer() {
       }
       const ms = Math.min(30 * 60_000, Math.max(0, Number(body?.ms) || 0));
       pinnedUntil = Date.now() + ms;
-      if (ms && VALID_STATES.has(body?.state)) pushView({ state: body.state, settle: body.state, label: '' });
+      if (ms && VALID_STATES.has(body?.state)) {
+        const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+        const team = Array.isArray(body.team) ? body.team.slice(0, 8).map((m, i) => ({
+          id: str(m?.id, 40) || `t${i}`,
+          kind: m?.kind === 'session' ? 'session' : 'subagent',
+          icon: str(m?.icon, 8) || '🤖',
+          name: str(m?.name, 40),
+          label: str(m?.label, 80),
+          state: VALID_STATES.has(m?.state) ? m.state : 'working',
+        })) : [];
+        pushView({ state: body.state, settle: body.state, label: str(body.label, 120), activity: str(body.activity, 20) || null, team });
+      }
       else if (!ms) pushView(sessions.view());
       return reply(200, { ok: true, pinnedMs: ms });
+    }
+
+    // The renderer's view of the pet: agent state, reaction, held, resting, which clip.
+    if (VERBOSE && req.method === 'GET' && url.pathname === '/debug/pet') {
+      return reply(200, await win.webContents.executeJavaScript('window.__petDebug.pet()'));
     }
 
     // Per-process CPU and memory (Electron's own accounting) plus the renderer's draw rate and JS heap.

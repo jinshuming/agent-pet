@@ -7,7 +7,21 @@ export const STATE_LINES: Partial<Record<AgentState, string[]>> = {
   permission: ['这个要你点头哦～', '可以吗？可以吗？', '批准一下嘛 🙏'],
   done: ['呼…终于好了…', '累死了，快夸我！', '搞定！喘口气…'],
   error: ['啊啊啊出错了…', '没事没事，再来一次！', '我不信我搞不定！'],
-  sleep: ['Zzz…', '困了…'],
+  sleep: ['大家都去休息了吗…', '好安静啊…'],
+};
+
+/** A new task arrives: he rolls up his sleeves. */
+export const ACCEPT_LINES = ['收到！', '交给我吧～', '开工开工！', '好嘞！'];
+/** Waiting on you, by PERMISSION_STAGES index: the bubble keeps the question, these go in front of it. */
+export const PERMISSION_NAG_LINES = [
+  [],
+  ['喂喂～看这里！', '需要你点一下！', '等你拍板呢！'],
+  ['咚咚咚，还在吗？', '敲敲屏幕…', '你去哪儿啦～'],
+];
+/** Subagents: sending them off, and one coming back. */
+export const TEAM_LINES = {
+  dispatch: ['去吧，小分队！', '分头行动！', '拜托你们啦～'],
+  report: ['收到汇报～', '干得漂亮！', '辛苦啦！'],
 };
 
 export const REACTION_LINES: Record<Reaction, string[]> = {

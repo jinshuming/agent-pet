@@ -2,36 +2,59 @@
 // Priority (after CoPet): dragging / flying / hanging > critical agent state > reaction > agent state.
 import type { SplatPetRenderer } from '../render/SplatPetRenderer';
 import {
+  ACTIVITY_CLIPS,
   AGENT_SEQUENCES,
+  BOREDOM,
   BUSY,
+  BUSY_DWELL_MS,
   DRAG_SEQUENCE,
   HANG,
   HANG_SEQUENCE,
-  IDLE_FIDGETS,
-  IDLE_FIDGET_MS,
   LEAN_CLIPS,
+  PERMISSION_ALTERNATE_MS,
+  PERMISSION_STAGES,
   REACTION_SEQUENCES,
   REST_MS,
+  REST_SLEEPY_MS,
+  THINK_CLIPS,
+  THINK_VARY_MS,
+  type Activity,
   type AgentState,
+  type ClipName,
+  type Fidget,
   type Reaction,
   type Step,
   type Wall,
 } from './clips';
 import {
+  ACCEPT_LINES,
   FLY_LINES,
   HANG_LINES,
   HANG_POKE_LINES,
   HANG_TIRED_LINES,
   LEAN_LINES,
+  PERMISSION_NAG_LINES,
   REACTION_LINES,
   REST_LINES,
   STATE_LINES,
+  TEAM_LINES,
   pick,
 } from './lines';
 
 const CRITICAL: ReadonlySet<AgentState> = new Set(['permission', 'error']);
 /** Agent states that leave him free to rest. */
 const RESTFUL: ReadonlySet<AgentState> = new Set(['idle', 'sleep']);
+/** Coming from one of these into thinking/working means a new task: he rolls up his sleeves first. */
+const UNOCCUPIED: ReadonlySet<AgentState> = new Set(['idle', 'sleep', 'done', 'greet']);
+
+/**
+ * How much he looks at the cursor: `head` turns the neck and head, `body` the whole body.
+ * `wander`: with the cursor parked he looks around on his own. `fast`: snap to it (he wants you).
+ */
+export type Gaze = { head: number; body: number; wander: boolean; fast: boolean };
+const NO_GAZE: Gaze = { head: 0, body: 0, wander: false, fast: false };
+
+const rand = (r: { min: number; max: number }) => r.min + Math.random() * (r.max - r.min);
 
 /** Left alone: walking to a wall, sat against it, nodding off, asleep, or getting back up. */
 export type Rest = 'walking' | 'sitting' | 'dozing' | 'asleep' | 'standing';
@@ -59,9 +82,28 @@ export class PetController {
   private settle: AgentState = 'idle';
   /** What the agent is doing, from the main process (e.g. "✏️ main.ts"). */
   private label = '';
-  /** The one-shot currently playing over the agent state ('preview' = from the menu, 'fidget' = idle life). */
-  private reaction: Reaction | 'preview' | 'fidget' | null = null;
+  /** The kind of work, while thinking or working (the tool the agent runs). */
+  private activity: Activity | null = null;
+  /**
+   * The one-shot currently playing over the agent state ('preview' = from the menu,
+   * 'fidget' = idle life, 'team' = a subagent reporting back).
+   */
+  private reaction: Reaction | 'preview' | 'fidget' | 'team' | null = null;
   private fidgetTimer: number | undefined;
+  private lastFidget: ClipName | null = null;
+  /** How long he's been left with nothing to do (from main.ts, every frame): how bored he is. */
+  private quietMs = 0;
+  // Busy (thinking / working): which loop plays, since when, and the timers that change it.
+  private pendingAccept = false;
+  private busyClip: ClipName | null = null;
+  private busySince = 0;
+  private thinkClip: ClipName = THINK_CLIPS[0];
+  private dwellTimer: number | undefined;
+  private varyTimer: number | undefined;
+  private lineTimer: number | undefined;
+  // Waiting on you: since when, and the timer that makes him more insistent.
+  private permissionSince = 0;
+  private nagTimer: number | undefined;
   private dragging = false;
   /** Thrown through the air, or hanging from the top edge. Agent motions wait until he lands. */
   private airborne: 'flying' | 'hanging' | null = null;
@@ -128,10 +170,15 @@ export class PetController {
     return RESTFUL.has(this.agent) && !this.held && this.rest !== 'standing' && (this.reaction === null || this.reaction === 'fidget');
   }
 
-  /** Called every frame with how long he's been left alone; walks him to a wall and puts him to sleep. */
+  /**
+   * Called every frame with how long he's been left alone; walks him to a wall and puts him to sleep.
+   * Once every agent is asleep he's drowsy and does it much sooner.
+   */
   restTick(quietMs: number): void {
+    this.quietMs = quietMs;
     if (!this.isFree) return;
-    if (this.rest === null && quietMs >= REST_MS.sit) {
+    const ms = this.agent === 'sleep' ? REST_SLEEPY_MS : REST_MS;
+    if (this.rest === null && quietMs >= ms.sit) {
       this.reaction = null; // cut a fidget short
       if (this.wall) return this.sitDown(this.wall);
       this.rest = 'walking';
@@ -140,7 +187,7 @@ export class PetController {
       this.renderer.play([{ clip: 'walk', loop: true }]);
       return;
     }
-    if (this.rest === 'sitting' && quietMs >= REST_MS.sleep) this.doze();
+    if (this.rest === 'sitting' && quietMs >= ms.sleep) this.doze();
   }
 
   /** Touched, or the agent got busy: get up (or stop walking). Returns whether he was resting. */
@@ -198,16 +245,36 @@ export class PetController {
     return this.dragging || this.airborne !== null;
   }
 
-  setAgentState(state: AgentState, settle: AgentState = 'idle', label = ''): void {
-    const same = state === this.agent;
+  setAgentState(state: AgentState, settle: AgentState = 'idle', label = '', activity: Activity | null = null): void {
+    const prev = this.agent;
+    const same = state === prev;
+    const activityChanged = activity !== this.activity;
     this.settle = settle;
     this.label = label;
-    // Consecutive tool calls re-send "working": keep the loop (and any reaction) running.
+    this.activity = activity;
+    if (state !== 'permission') {
+      window.clearTimeout(this.nagTimer);
+      this.permissionSince = 0;
+    } else if (!same) this.permissionSince = performance.now();
+    // Consecutive tool calls re-send "working": keep the loop (and any reaction) running,
+    // but a different kind of tool gets its own motion (once the current one has had its moment).
     if (same && !this.held) {
-      if (!this.reaction) this.onLabel(this.agentLine());
+      if (this.reaction) return;
+      this.say(state === 'permission' ? this.permissionLine() : this.agentLine());
+      if (BUSY.has(state) && activityChanged && !this.rest) this.busyChanged();
       return;
     }
+    // A new task after doing nothing: he gets ready for it first.
+    this.pendingAccept = BUSY.has(state) && (UNOCCUPIED.has(prev) || this.pendingAccept);
     this.agent = state;
+    // Thinking ↔ working flips with every tool call: change the motion, but not faster than BUSY_DWELL_MS,
+    // and let a reaction (an impatient "wait") finish first.
+    if (BUSY.has(prev) && BUSY.has(state) && !this.held && !this.rest) {
+      if (this.reaction) return;
+      this.say(this.agentLine());
+      this.busyChanged();
+      return;
+    }
     this.reaction = null;
     // The agent has work: he gets up off the floor first (wake re-applies the state after).
     if (this.rest && !RESTFUL.has(state)) {
@@ -356,10 +423,163 @@ export class PetController {
     else this.react(hard ? 'dizzy' : 'drop');
   }
 
-  /** Working shows what the agent is doing; other states speak in the idol's voice. */
+  /** Working shows what the agent is doing, waiting shows what it's asking; other states speak in the idol's voice. */
   private agentLine(): string {
-    if (this.agent === 'working') return this.label;
+    if (this.agent === 'working' || (this.agent === 'permission' && this.label)) return this.label;
+    if (this.agent === 'thinking' && this.activity === 'tidy') return this.label;
     return pick(STATE_LINES[this.agent]) || this.label;
+  }
+
+  /** The question, with a nudge in front once he's been waiting a while. */
+  private permissionLine(stage = this.permissionStage().index): string {
+    const nag = pick(PERMISSION_NAG_LINES[stage]);
+    return nag ? `${nag}\n${this.agentLine()}` : this.agentLine();
+  }
+
+  /** Show a line; a later say() (or setAgentState) replaces it. */
+  private say(text: string): void {
+    window.clearTimeout(this.lineTimer);
+    this.onLabel(text);
+  }
+
+  /** Show a line for `ms`, then go back to saying what the agent is doing. */
+  private sayFor(text: string, ms: number): void {
+    this.say(text);
+    this.lineTimer = window.setTimeout(() => {
+      if (!this.reaction && !this.held && !this.rest) this.onLabel(this.agentLine());
+    }, ms);
+  }
+
+  /** Dev (/debug/pet): what the controller thinks is going on. */
+  debugState(): Record<string, unknown> {
+    return {
+      agent: this.agent,
+      activity: this.activity,
+      reaction: this.reaction,
+      dragging: this.dragging,
+      airborne: this.airborne,
+      wall: this.wall,
+      rest: this.rest,
+      busyClip: this.busyClip,
+      clip: this.renderer.currentClip,
+      quietS: Math.round(this.quietMs / 1000),
+    };
+  }
+
+  /** How much he looks at the cursor right now (see Gaze). */
+  get gaze(): Gaze {
+    if (this.dragging || this.airborne === 'flying') return NO_GAZE;
+    if (this.airborne === 'hanging') return { head: 0.5, body: 0, wander: false, fast: false };
+    if (this.rest) return this.rest === 'sitting' ? { head: 0.8, body: 0, wander: true, fast: false } : NO_GAZE;
+    if (this.reaction === 'fidget') return { head: 0.35, body: 0.5, wander: false, fast: false };
+    if (this.reaction) return { head: 0.3, body: 0.6, wander: false, fast: false };
+    if (this.isLeaning) return { head: 0.8, body: 0, wander: true, fast: false };
+    switch (this.agent) {
+      case 'permission':
+        return { head: 1, body: 1, wander: false, fast: true };
+      case 'thinking':
+        return { head: 0.5, body: 0.35, wander: false, fast: false };
+      case 'working':
+        return { head: 0.35, body: 0.25, wander: false, fast: false };
+      case 'error':
+        return { head: 0.3, body: 0.5, wander: false, fast: false };
+      default: // idle, greet, done, sleep
+        return { head: 1, body: 0.7, wander: this.agent === 'idle' || this.agent === 'sleep', fast: false };
+    }
+  }
+
+  /** A subagent finished and reported back: a nod, then back to supervising. */
+  teamReport(): void {
+    if (this.held || this.rest || this.reaction || !BUSY.has(this.agent)) return;
+    this.reaction = 'team';
+    this.say(pick(TEAM_LINES.report));
+    this.renderer.play([{ clip: 'report', loop: false }], () => {
+      if (this.reaction !== 'team') return;
+      this.reaction = null;
+      this.applyAgent();
+    });
+  }
+
+  // ---------- busy: thinking and working ----------
+
+  /** The loop for what the agent is doing now: by kind of tool, or one of the ways of thinking. */
+  private busyTarget(): ClipName {
+    if (this.activity && (this.agent === 'working' || this.activity === 'tidy')) return ACTIVITY_CLIPS[this.activity];
+    return this.agent === 'working' ? 'typing' : this.thinkClip;
+  }
+
+  /** The agent moved on to another kind of work: switch motions once the current one has played BUSY_DWELL_MS. */
+  private busyChanged(): void {
+    window.clearTimeout(this.dwellTimer);
+    const wait = this.busySince + BUSY_DWELL_MS - performance.now();
+    if (wait > 0) {
+      this.dwellTimer = window.setTimeout(() => this.busyChanged(), wait);
+      return;
+    }
+    if (this.held || this.rest || this.reaction || !BUSY.has(this.agent)) return;
+    if (this.busyTarget() !== this.busyClip) this.playBusy();
+  }
+
+  private playBusy(intro: Step[] = []): void {
+    const clip = this.busyTarget();
+    const steps = [...intro];
+    // Subagents going out: send them off before settling in to watch them.
+    if (clip === 'supervise' && this.busyClip !== 'supervise') {
+      steps.push({ clip: 'dispatch', loop: false });
+      if (!intro.length) this.sayFor(pick(TEAM_LINES.dispatch), 3000);
+    }
+    steps.push({ clip, loop: true });
+    this.busyClip = clip;
+    this.busySince = performance.now();
+    this.renderer.play(steps);
+    this.scheduleThinkVariation();
+  }
+
+  /** Thinking for a long time: now and then he thinks a different way (scratching his head, counting on his fingers). */
+  private scheduleThinkVariation(): void {
+    window.clearTimeout(this.varyTimer);
+    if (this.agent !== 'thinking' || this.activity) return;
+    this.varyTimer = window.setTimeout(() => {
+      if (this.agent !== 'thinking' || this.activity || this.held || this.rest) return;
+      if (this.reaction) return this.scheduleThinkVariation();
+      const others = THINK_CLIPS.filter((c) => c !== this.thinkClip);
+      this.thinkClip = others[Math.floor(Math.random() * others.length)];
+      this.playBusy();
+    }, rand(THINK_VARY_MS));
+  }
+
+  private stopBusy(): void {
+    window.clearTimeout(this.dwellTimer);
+    window.clearTimeout(this.varyTimer);
+    this.busyClip = null;
+  }
+
+  // ---------- waiting on you ----------
+
+  /** Which PERMISSION_STAGES entry applies after waiting this long, and how long until the next one. */
+  private permissionStage(): { index: number; nextMs: number } {
+    const t = performance.now() - this.permissionSince;
+    const last = PERMISSION_STAGES.length - 1;
+    const lastAt = PERMISSION_STAGES[last].afterMs;
+    if (t < lastAt) {
+      let index = 0;
+      while (index < last && t >= PERMISSION_STAGES[index + 1].afterMs) index++;
+      return { index, nextMs: PERMISSION_STAGES[index + 1].afterMs - t };
+    }
+    // Past the last stage: take turns with the one before it.
+    const k = Math.floor((t - lastAt) / PERMISSION_ALTERNATE_MS);
+    return { index: k % 2 === 0 ? last : last - 1, nextMs: PERMISSION_ALTERNATE_MS - ((t - lastAt) % PERMISSION_ALTERNATE_MS) };
+  }
+
+  private playPermission(): void {
+    window.clearTimeout(this.nagTimer);
+    if (!this.permissionSince) this.permissionSince = performance.now();
+    const { index, nextMs } = this.permissionStage();
+    this.say(this.permissionLine(index));
+    this.renderer.play([{ clip: PERMISSION_STAGES[index].clip, loop: true }]);
+    this.nagTimer = window.setTimeout(() => {
+      if (this.agent === 'permission' && !this.held && !this.reaction && !this.rest) this.playPermission();
+    }, nextMs + 50);
   }
 
   /** Replay the current agent state from the start (e.g. after the character changed). */
@@ -372,21 +592,29 @@ export class PetController {
     } else if (!this.held) this.applyAgent();
   }
 
-  /** While idle (and nothing else is playing), queue the next little idle action. */
+  /** How bored he is: the BOREDOM tier for how long he's had nothing to do. */
+  private boredom(): (typeof BOREDOM)[number] {
+    let tier = BOREDOM[0];
+    for (const t of BOREDOM) if (this.quietMs >= t.afterMs) tier = t;
+    return tier;
+  }
+
+  /** While idle (and nothing else is playing), queue the next little idle action; the more bored, the sooner. */
   private scheduleFidget(): void {
     window.clearTimeout(this.fidgetTimer);
     if (this.agent !== 'idle' || this.wall) return;
-    const delay = IDLE_FIDGET_MS.min + Math.random() * (IDLE_FIDGET_MS.max - IDLE_FIDGET_MS.min);
     this.fidgetTimer = window.setTimeout(() => {
-      if (this.agent !== 'idle' || this.reaction || this.held || this.rest) return this.scheduleFidget();
-      const f = IDLE_FIDGETS[Math.floor(Math.random() * IDLE_FIDGETS.length)];
+      if (this.agent !== 'idle' || this.reaction || this.held || this.rest || this.wall) return this.scheduleFidget();
+      const pool = this.boredom().fidgets.filter((f) => f.clip !== this.lastFidget);
+      const f: Fidget = pool[Math.floor(Math.random() * pool.length)];
+      this.lastFidget = f.clip;
       this.reaction = 'fidget';
-      this.onLabel(pick(f.lines));
-      this.renderer.play(f.steps, () => {
+      this.say(pick(f.lines));
+      this.renderer.play([{ clip: f.clip, loop: false }], () => {
         this.reaction = null;
         this.applyAgent();
       });
-    }, delay);
+    }, rand(this.boredom().every));
   }
 
   /** Back to the rest pose after something interrupted it (a menu preview, a character swap). */
@@ -415,9 +643,21 @@ export class PetController {
     if (this.rest) return this.resumeRest();
     this.scheduleFidget();
     const state = this.agent;
-    this.onLabel(this.agentLine());
-    const tint = state === 'sleep' ? SLEEP_TINT : state === 'error' ? ERROR_TINT : null;
+    const tint = state === 'error' ? ERROR_TINT : null;
     this.renderer.setTint(tint?.intensity ?? 0, tint?.color);
+    if (!BUSY.has(state)) this.stopBusy();
+    if (state === 'permission') return this.playPermission();
+    if (BUSY.has(state)) {
+      // A new task: "got it!", roll up the sleeves, then get to it.
+      if (this.pendingAccept) {
+        this.pendingAccept = false;
+        this.sayFor(pick(ACCEPT_LINES), 2600);
+        return this.playBusy([{ clip: 'accept', loop: false }]);
+      }
+      this.say(this.agentLine());
+      return this.playBusy();
+    }
+    this.say(this.agentLine());
     if (state === 'idle' && this.wall) return this.lean(this.wall);
     this.renderer.play(AGENT_SEQUENCES[state], () => {
       // Transient states (done, error) settle once their motion ends.

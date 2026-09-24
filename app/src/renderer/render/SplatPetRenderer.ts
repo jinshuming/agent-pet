@@ -1,7 +1,7 @@
 // The only module that talks to @viggle/splat-engine / PlayCanvas.
 // Everything above it deals in Steps (clip + loop) and screen coordinates.
 import { Animation, Character, Scene } from '@viggle/splat-engine';
-import { Vec3 } from 'playcanvas';
+import { Quat, Vec3, type Mat4 } from 'playcanvas';
 import { CLIP_FALLBACK, CLIP_FILES, type ClipName, type Step } from '../pet/clips';
 
 const CROSSFADE_S = 0.25;
@@ -15,6 +15,35 @@ const FILL_HEIGHT = 0.53;
 /** Gap between the feet and the bottom edge, as a fraction of the canvas height. Mirrored in main.cjs (FEET_GAP_PX). */
 const FEET_MARGIN = 0.15;
 const ALPHA_HIT_THRESHOLD = 24; // 0..255
+/**
+ * Head look-at: how a turn toward the cursor is shared down the neck (the rest of the
+ * body turns as a whole, see setYaw). Shares of the yaw, and of the pitch.
+ */
+const LOOK_BONES: { name: RegExp; yaw: number; pitch: number }[] = [
+  { name: /^spine_05$/i, yaw: 0.15, pitch: 0.1 },
+  { name: /^neck_01$/i, yaw: 0.3, pitch: 0.3 },
+  { name: /^neck_02$/i, yaw: 0.2, pitch: 0.2 },
+  { name: /^head$/i, yaw: 0.35, pitch: 0.4 },
+];
+/**
+ * Clips always in memory: what plays most of the time, and what must start the instant
+ * you grab him. Every other clip loads the first time it plays (a few tens of ms from
+ * disk) and stays among the CLIP_CACHE most recently used. The engine keeps each loaded
+ * clip as JS keyframe objects, about 6–8 MB of heap apiece, so loading all 53 up front
+ * would cost ~400 MB.
+ */
+const RESIDENT_CLIPS: ClipName[] = ['idle', 'breathe', 'think', 'typing', 'plead', 'flail', 'hang', 'land'];
+const CLIP_CACHE = 12;
+const UP = new Vec3(0, 1, 0);
+const RIGHT = new Vec3(1, 0, 0);
+
+/** The engine internals the look-at hooks into (see installLook). */
+type ArmatureInternals = {
+  _applyRigPostClamps?: () => void;
+  _currentPose?: { rotations: Quat[] };
+  skeleton?: { parents: ArrayLike<number> };
+  boneWorldMatrices: readonly Mat4[];
+};
 
 export type BodyPart = 'head' | 'body';
 export type HitResult = { hit: false } | { hit: true; part: BodyPart };
@@ -32,6 +61,15 @@ export class SplatPetRenderer {
   private readonly pixel = new Uint8Array(4);
   /** Camera height chosen by autoFrame; setLift offsets from it. */
   private framedCamY: number | null = null;
+  // Head look-at (setLook): degrees, and the bones it turns with their parents.
+  private lookYaw = 0;
+  private lookPitch = 0;
+  private lookBones: { bone: number; parent: number; yaw: number; pitch: number }[] = [];
+  private readonly qParent = new Quat();
+  private readonly qInv = new Quat();
+  private readonly qDelta = new Quat();
+  private readonly qYaw = new Quat();
+  private readonly qPitch = new Quat();
 
   // ---------- frame budget ----------
   // A desktop pet runs all day next to real work, so it renders at `targetFps`
@@ -45,11 +83,18 @@ export class SplatPetRenderer {
   private lastTickAt = 0;
   private renders: number[] = [];
 
+  // ---------- clips on demand (see RESIDENT_CLIPS) ----------
+  /** Non-resident clips in memory, least recently played first. */
+  private readonly cachedClips = new Set<ClipName>();
+  private readonly loadingClips = new Map<ClipName, Promise<boolean>>();
+  private readonly failedClips = new Set<ClipName>();
+  /** Bumped by every play(): a play still waiting for its clips to load is dropped if another came after it. */
+  private playToken = 0;
+
   private constructor(
     private readonly scene: Scene,
     private character: Character,
     private readonly canvas: HTMLCanvasElement,
-    private readonly loadedClips: ReadonlySet<ClipName>,
   ) {
     this.findBones();
     scene.app.autoRender = false;
@@ -118,7 +163,60 @@ export class SplatPetRenderer {
       .map((n, i) => (/^(head|pelvis|hand_[lr]|foot_[lr])$/i.test(n) ? i : -1))
       .filter((i) => i >= 0);
     this.handBones = names.map((n, i) => (/^hand_[lr]$/i.test(n) ? i : -1)).filter((i) => i >= 0);
+    this.installLook();
     console.log(`[pet] ${names.length} bones, head=${this.headBone}, neck=${this.neckBone}, extent=${this.extentBones.length}`);
+  }
+
+  /**
+   * Turn his head toward something, on top of whatever clip is playing: `yaw` degrees
+   * toward the screen's right, `pitch` degrees up. The body's own turn (setYaw) comes on top.
+   */
+  setLook(yaw: number, pitch: number): void {
+    this.lookYaw = yaw;
+    this.lookPitch = pitch;
+  }
+
+  /**
+   * The engine has no look-at, so this wraps the armature's last pose step (after the clip
+   * and its crossfades are evaluated, before skinning) to turn the neck and head. Each bone's
+   * local rotation gets the world-space turn, carried into its parent's frame. The parent's
+   * frame comes from the previous skinned frame, which is close enough for a few degrees.
+   * If a later engine renames the hook, he simply stops looking around.
+   */
+  private installLook(): void {
+    const a = this.character.armature as unknown as ArmatureInternals;
+    const names = this.character.armature.boneNames;
+    const parents = a.skeleton?.parents;
+    const inner = a._applyRigPostClamps;
+    if (typeof inner !== 'function' || !parents) {
+      this.lookBones = [];
+      return;
+    }
+    this.lookBones = LOOK_BONES.map(({ name, yaw, pitch }) => {
+      const bone = names.findIndex((n) => name.test(n));
+      return { bone, parent: bone >= 0 ? parents[bone] : -1, yaw, pitch };
+    }).filter((b) => b.bone >= 0 && b.parent >= 0);
+    a._applyRigPostClamps = () => {
+      inner.call(a);
+      if (a._currentPose) this.applyLook(a._currentPose.rotations, a.boneWorldMatrices);
+    };
+  }
+
+  private applyLook(rotations: Quat[], world: readonly Mat4[]): void {
+    if (Math.abs(this.lookYaw) < 0.05 && Math.abs(this.lookPitch) < 0.05) return;
+    for (const b of this.lookBones) {
+      const pm = world[b.parent];
+      if (!pm) continue;
+      this.qYaw.setFromAxisAngle(UP, this.lookYaw * b.yaw);
+      // Characters face +Z (toward the camera): tipping about +X would look down, so up is negative.
+      this.qPitch.setFromAxisAngle(RIGHT, -this.lookPitch * b.pitch);
+      this.qDelta.mul2(this.qYaw, this.qPitch);
+      this.qParent.setFromMat4(pm).normalize();
+      this.qInv.copy(this.qParent).invert();
+      // local' = parent⁻¹ · delta · parent · local: the world-space turn, applied in the bone's own space.
+      this.qDelta.mul2(this.qInv, this.qDelta).mul(this.qParent);
+      rotations[b.bone].mul2(this.qDelta, rotations[b.bone]).normalize();
+    }
   }
 
   /**
@@ -154,22 +252,9 @@ export class SplatPetRenderer {
     });
     scene.start();
 
-    const clipEntries = Object.entries(CLIP_FILES) as [ClipName, string][];
-    const [character, ...clipResults] = await Promise.all([
-      Character.loadVsplat(scene, characterUrl),
-      // One missing or broken clip must not take the whole pet down.
-      ...clipEntries.map(([name, url]) =>
-        Animation.loadGlb(scene, url, name).then(
-          () => name,
-          (err: unknown) => {
-            console.warn(`[pet] clip ${name} (${url}) failed to load, falling back to idle: ${err}`);
-            return null;
-          },
-        ),
-      ),
-    ]);
-    const loaded = new Set(clipResults.filter((n): n is ClipName => n !== null));
-    const r = new SplatPetRenderer(scene, character, canvas, loaded);
+    const character = await Character.loadVsplat(scene, characterUrl);
+    const r = new SplatPetRenderer(scene, character, canvas);
+    await Promise.all(RESIDENT_CLIPS.map((c) => r.loadClip(c)));
     r.play([{ clip: 'idle', loop: true }]);
     await r.autoFrame();
     return r;
@@ -177,12 +262,72 @@ export class SplatPetRenderer {
 
   // ---------- animation ----------
 
-  /** Replace the current motion with a sequence. `onDone` fires when a non-looping sequence ends. */
+  /**
+   * Replace the current motion with a sequence. `onDone` fires when a non-looping sequence ends.
+   * Clips not in memory load first (the current motion carries on meanwhile); if another play()
+   * comes in before they're ready, this one is dropped.
+   */
   play(steps: Step[], onDone?: () => void): void {
-    this.seq = steps;
-    this.seqIndex = 0;
-    this.onSeqDone = onDone ?? null;
-    this.startStep(steps[0]);
+    const token = ++this.playToken;
+    const missing = steps.map((s) => s.clip).filter((c) => !this.isLoaded(c) && !this.failedClips.has(c));
+    const start = () => {
+      if (token !== this.playToken) return;
+      this.seq = steps;
+      this.seqIndex = 0;
+      this.onSeqDone = onDone ?? null;
+      this.startStep(steps[0]);
+    };
+    if (!missing.length) return start();
+    void Promise.all(missing.map((c) => this.loadClip(c))).then(start);
+  }
+
+  private isLoaded(clip: ClipName): boolean {
+    return this.scene.skeletalAnimationLibrary.has(clip);
+  }
+
+  /**
+   * Fetch, parse and register one clip. Not through Animation.loadGlb: that keeps every
+   * file's bytes in a process-wide cache forever, and caches failed dev-server fetches.
+   * One missing or broken clip must not take the whole pet down: it plays its fallback.
+   */
+  private loadClip(clip: ClipName): Promise<boolean> {
+    if (this.isLoaded(clip)) return Promise.resolve(true);
+    if (this.failedClips.has(clip)) return Promise.resolve(false);
+    let p = this.loadingClips.get(clip);
+    if (!p) {
+      const url = CLIP_FILES[clip];
+      p = fetch(url)
+        .then((res) => {
+          if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+          return res.arrayBuffer();
+        })
+        .then((buf) => {
+          Animation.fromGlb(buf).register(this.scene, clip);
+          return true;
+        })
+        .catch((err: unknown) => {
+          console.warn(`[pet] clip ${clip} (${url}) failed to load, playing its fallback: ${err}`);
+          this.failedClips.add(clip);
+          return false;
+        })
+        .finally(() => this.loadingClips.delete(clip));
+      this.loadingClips.set(clip, p);
+    }
+    return p;
+  }
+
+  /** A clip just started: mark it most recently used, and drop the least recently used past CLIP_CACHE. */
+  private touchClip(clip: ClipName): void {
+    if (RESIDENT_CLIPS.includes(clip)) return;
+    this.cachedClips.delete(clip);
+    this.cachedClips.add(clip);
+    const inUse = new Set(this.seq.map((s) => s.clip));
+    for (const old of this.cachedClips) {
+      if (this.cachedClips.size <= CLIP_CACHE) break;
+      if (inUse.has(old)) continue;
+      this.cachedClips.delete(old);
+      this.scene.skeletalAnimationLibrary.delete(old); // its keyframes go with it (a WeakMap in the engine)
+    }
   }
 
   /**
@@ -192,11 +337,8 @@ export class SplatPetRenderer {
    */
   private startStep(step: Step, quiet = false): void {
     const fallback = CLIP_FALLBACK[step.clip];
-    const clip: ClipName = this.loadedClips.has(step.clip)
-      ? step.clip
-      : fallback && this.loadedClips.has(fallback)
-        ? fallback
-        : 'idle';
+    const clip: ClipName = this.isLoaded(step.clip) ? step.clip : fallback && this.isLoaded(fallback) ? fallback : 'idle';
+    this.touchClip(clip);
     const ok = this.character.crossfadeTo(clip, { duration: CROSSFADE_S, loop: false });
     if (!ok) console.warn(`[pet] clip not found: ${clip}`);
     const a = this.character.armature;
@@ -223,9 +365,9 @@ export class SplatPetRenderer {
     done?.();
   }
 
-  /** Whether a clip loaded successfully (missing ones silently play idle). */
+  /** Whether a clip can play (one that failed to load silently plays its fallback). */
   hasClip(clip: ClipName): boolean {
-    return this.loadedClips.has(clip);
+    return !this.failedClips.has(clip);
   }
 
   get currentClip(): ClipName | null {
@@ -306,6 +448,11 @@ export class SplatPetRenderer {
   pxPerMeter(): number {
     const dist = this.scene.cameraEntity.getPosition().z;
     return this.canvas.clientHeight / (2 * dist * Math.tan(((FOV_DEG / 2) * Math.PI) / 180));
+  }
+
+  /** Screen (CSS px) position of the head bone: where he looks from. */
+  headScreen(): { x: number; y: number } | null {
+    return this.boneScreen(this.headBone);
   }
 
   /** Screen (CSS px) position of the top of the head, for speech bubbles. */
@@ -391,7 +538,8 @@ export class SplatPetRenderer {
     const saved = { seq: this.seq, index: this.seqIndex, done: this.onSeqDone };
     this.forceRender = Number.MAX_SAFE_INTEGER;
     this.setYaw(0);
-    for (const clip of this.loadedClips) {
+    for (const clip of Object.keys(CLIP_FILES) as ClipName[]) {
+      if (!(await this.loadClip(clip))) continue;
       this.play([{ clip, loop: false }]);
       let minX = w, maxX = -1, minY = h, maxY = -1;
       const deadline = performance.now() + 15000;

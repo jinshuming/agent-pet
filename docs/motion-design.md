@@ -144,3 +144,56 @@ The prompts:
 PINOC's metahuman-glb skins all 441 MetaHuman joints, and splat-engine sizes a clip by its skin: every joint gets a keyframe object per frame in the JS heap, and at play time the clip is filtered down to the characters' 86-bone rig anyway. `npm run slim-clips` (`scripts/slim-clips.mjs`) re-skins each clip to exactly those 86 bones (all their parents are inside the set) and drops the other channels, leaving the node hierarchy alone. The kept channels are bit-identical and splat-engine rebuilds the same keyframes from them, so poses don't change; the JS heap went from 1.2 GB to 0.29 GB, the clips from 33 MB to 7.5 MB, and the renderer's CPU at 60 fps from ~40% to ~10% of a core. Run it on every new clip (CI checks).
 
 Library clips no state or reaction used any more (wave, cheer, clap, nod, jump, head-hit, hit-front, crouch, point, and the travelling walk that walk-in-place is made from) were removed; each cost about 7 MB of heap.
+
+## Acting out the agent (generated 2026-09-24, 83 credits)
+
+What the pet does while the agent works now depends on the kind of work, and idle time has a shape:
+
+- **Gaze.** The head turns toward the cursor on top of any clip (`SplatPetRenderer.setLook` wraps the armature's post-pose step and turns spine_05 / neck_01 / neck_02 / head). The body follows more slowly (`stepGaze` in `main.ts`). `PetController.gaze` sets how much, per state: full and fast while waiting on you, a glance while working, eyes wandering when the cursor sits still and he has nothing to do.
+- **A new task** (idle/sleep/done → thinking or working) plays `accept` first.
+- **Thinking** rotates `think` / `thinkScratch` / `thinkCount` every 9–15 s.
+- **Working** plays a clip per tool kind (`ACTIVITY_CLIPS`, from `toolActivity` in `agent-sessions.cjs`): edit → typing, read → `read`, search/web → `search`, Bash/MCP → `run`, subagents → `dispatch` then `supervise`, compaction → `tidy`. A motion plays at least 2.5 s (`BUSY_DWELL_MS`) before the next tool may change it.
+- **Subagents** show as chips beside him (`pet/team.ts`), each with what it is doing; when one finishes he nods (`report`).
+- **Waiting on you** escalates (`PERMISSION_STAGES`): `plead`, then `urgent` at 12 s, `knock` at 35 s, then alternating. The bubble turns red and shows the question.
+- **Boredom** (`BOREDOM`): fix hair / stretch at first, scratching and pebble-kicking after 40 s, yawning / checking the watch / foot-tapping after 100 s, and after 3 minutes he goes to sit against a wall. Once every agent is asleep (`sleep`), he yawns and does it within 30 s and nods off after 60 s (`REST_SLEEPY_MS`); the old standing doze is no longer used.
+
+| Clip file | Use | Sample | Why |
+|---|---|---|---|
+| `idle-scratch-head.glb` | bored fidget | Head Scratch (4) | Least drift (4.2 cm), liveliest |
+| `idle-scratch-itch.glb` | bored fidget | Itch Scratch Shrug (2) | Least drift, liveliest arms |
+| `idle-kick-pebble.glb` | bored fidget | Idle Pebble Kick (1) | Least drift (7.8 cm) |
+| `idle-yawn.glb` | very bored; `sleep` state | Bored Yawn Stretch (4) | Least drift, only one that ends near its start (3.5°) |
+| `idle-check-watch.glb` | very bored | Impatient Wait (4) | Low drift |
+| `idle-tap-foot.glb` | very bored | Bored Wait (4) | 1.7° seam; make-in-place removed its travel |
+| `task-accept.glb` | new task | Eager Work Prep (2) | Least drift (1.7 cm) |
+| `think-scratch.glb` | thinking variation | Puzzled Thought (3) | Least drift, 6.5° seam |
+| `think-count.glb` | thinking variation | Counting Plan (2) | Low drift, 8° seam (sample 3 had 23°) |
+| `work-read.glb` | Read | Reading Scroll (1) | 2.1 cm drift, 2.3° seam |
+| `work-search.glb` | Grep/Glob/web | Scan for Object (1) | Least drift |
+| `work-run.glb` | Bash/MCP | Machine Operator (3) | Least drift, 5° seam |
+| `work-tidy.glb` | compaction | Tidy Organize (3) | Best seam (9.5°); make-in-place |
+| `agent-dispatch.glb` | subagents go out | Team Leader Send-off (1) | Least drift, liveliest |
+| `agent-supervise.glb` | subagents working | Supervising Scan (2) | 3 cm drift, 2.8° seam |
+| `agent-report.glb` | a subagent reports back | library Nod Yes | Free. It faced 106° off: `face-forward.mjs` turned it |
+| `permission-urgent.glb` | waiting 12 s+ | Urgent Call Out (3) | Bouncy (arms 212°/s); make-in-place removed 12 cm of travel |
+| `permission-knock.glb` | waiting 35 s+ | Window Knock Plea (1) | Least drift, 5° seam |
+
+Each prompt ends with the usual *"Feet planted in place, facing forward"* plus either *"Start and end in the same pose so it loops seamlessly"* (loops) or *"Start and end in a relaxed neutral standing pose with arms at the sides"* (one-shots). The movement parts:
+
+- **idle-scratch-head (one-shot, 4s)**: raises the right hand and slowly scratches the back of the head, head tilting with a sheepish, puzzled glance around, lowers the hand with a small sigh.
+- **idle-scratch-itch (one-shot, 4s)**: reaches over the right shoulder to scratch the middle of the back, wriggling, then scratches the left forearm, a satisfied shrug.
+- **idle-kick-pebble (one-shot, 4s)**: looks down and idly kicks a small invisible pebble twice, watches it roll away, looks back up with a shrug.
+- **idle-yawn (one-shot, 5s)**: a big slow yawn, head back, right hand over the mouth, left arm stretching out, then rubs one eye and looks back drowsily.
+- **idle-check-watch (one-shot, 4s)**: checks an invisible wristwatch, taps it twice, sighs, then shrugs at the viewer palms up ("anything for me to do?").
+- **idle-tap-foot (one-shot, 6s)**: arms crossed, taps the right toe in a steady rhythm, head tilting, eyes wandering, a long sigh, unfolds the arms.
+- **task-accept (one-shot, 3s)**: perks up, one firm nod toward the viewer, claps once, pushes up both sleeves and rubs the palms together eagerly.
+- **think-scratch (loop, 6s)**: slowly scratches the side of the head with a furrowed brow, rubs the chin, head tilting, eyes up and to the side, a small hopeful nod.
+- **think-count (loop, 6s)**: looks slightly up, counts off points on the left hand's fingers with the right index finger, nodding at each, pauses to think.
+- **work-read (loop, 6s)**: holds an invisible tablet at chest height, head down, tracking the lines; every two seconds swipes up to scroll, a small focused nod.
+- **work-search (loop, 5s)**: leans forward with a hand over the eyes like a visor, scans left and right, leans in and points at something, back to scanning.
+- **work-run (loop, 6s)**: presses a big invisible button, folds the arms and watches intently, nodding along with small impatient weight shifts, presses it again.
+- **work-tidy (loop, 5s)**: gathers invisible papers from both sides, taps the stack square on an invisible table, sets it aside, brushes off the hands.
+- **agent-dispatch (one-shot, 4s)**: points forward decisively, sweeps the arm left and right assigning directions, claps twice, thumbs up toward the viewer.
+- **agent-supervise (loop, 6s)**: hands on hips, turns head and shoulders slowly left, centre, right as if checking on workers, approving nods, now and then points or waves.
+- **permission-urgent (loop, 5s)**: looks straight at the viewer, waves both arms high over the head in big crossing motions, bouncing, cups the hands around the mouth to call out.
+- **permission-knock (loop, 4s)**: leans toward the viewer and knocks on the glass three times, presses both palms flat against it and peers in pleadingly, points at the viewer.

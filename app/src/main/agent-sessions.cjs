@@ -33,17 +33,60 @@ const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LS', 'NotebookRead']);
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'apply_patch']);
 const WEB_TOOLS = new Set(['WebFetch', 'WebSearch']);
 
+const SEARCH_TOOLS = new Set(['Grep', 'Glob', 'LS', 'ToolSearch']);
+const AGENT_TOOLS = new Set(['Task', 'Agent']);
+const RUN_TOOLS = new Set(['Bash', 'BashOutput', 'KillShell', 'exec_command', 'shell', 'local_shell']);
+
 const base = (p) => (p ? path.basename(p) : '');
 
 function toolLabel(tool, input = {}) {
   if (!tool) return '';
   if (EDIT_TOOLS.has(tool)) return `✏️ ${base(input.filePath) || tool}`;
   if (READ_TOOLS.has(tool)) return `🔍 ${base(input.filePath) || input.pattern || tool}`;
-  if (tool === 'Bash') return `💻 ${input.description || input.command || 'Bash'}`;
+  if (RUN_TOOLS.has(tool)) return `💻 ${input.description || input.command || tool}`;
   if (WEB_TOOLS.has(tool)) return '🌐 查资料';
-  if (tool === 'Task' || tool === 'Agent') return '🧑‍🤝‍🧑 派出子 Agent';
+  if (AGENT_TOOLS.has(tool)) return `🧑‍🤝‍🧑 ${input.description || '派出子 Agent'}`;
   if (tool.startsWith('mcp__')) return `🔌 ${tool.split('__').slice(1).join('.')}`;
   return `🛠 ${tool}`;
+}
+
+/**
+ * What kind of work a tool is, so the pet can act it out: typing for edits, reading a
+ * tablet for reads, scanning the horizon for searches, watching a machine for commands.
+ */
+function toolActivity(tool) {
+  if (!tool) return null;
+  if (EDIT_TOOLS.has(tool)) return 'edit';
+  if (SEARCH_TOOLS.has(tool)) return 'search';
+  if (READ_TOOLS.has(tool)) return 'read';
+  if (RUN_TOOLS.has(tool)) return 'run';
+  if (WEB_TOOLS.has(tool)) return 'web';
+  if (AGENT_TOOLS.has(tool)) return 'agent';
+  if (tool.startsWith('mcp__')) return 'mcp';
+  return 'other';
+}
+
+/** A permission prompt, as a question: "可以运行 npm test 吗？". */
+function permissionLabel(tool, input = {}) {
+  if (!tool) return '🙋 等你授权';
+  const what = (s) => (s.length > 24 ? `${s.slice(0, 23)}…` : s);
+  if (EDIT_TOOLS.has(tool)) return `🙋 可以改 ${what(base(input.filePath) || '文件')} 吗？`;
+  if (RUN_TOOLS.has(tool)) return `🙋 可以运行 ${what(input.description || input.command || '命令')} 吗？`;
+  if (WEB_TOOLS.has(tool)) return '🙋 可以上网查资料吗？';
+  if (READ_TOOLS.has(tool)) return `🙋 可以看 ${what(base(input.filePath) || input.pattern || '文件')} 吗？`;
+  if (tool.startsWith('mcp__')) return `🙋 可以用 ${what(tool.split('__').slice(1).join('.'))} 吗？`;
+  return `🙋 可以用 ${what(tool)} 吗？`;
+}
+
+/** Subagent types by what they look like on the team strip. */
+function agentIcon(type = '') {
+  const t = type.toLowerCase();
+  if (t.includes('explore') || t.includes('search')) return '🔍';
+  if (t.includes('plan')) return '📐';
+  if (t.includes('review')) return '🧐';
+  if (t.includes('test')) return '🧪';
+  if (t.includes('guide') || t.includes('doc')) return '📚';
+  return '🤖';
 }
 
 class AgentSessions {
@@ -66,7 +109,7 @@ class AgentSessions {
     }
     let s = this.sessions.get(id);
     if (!s) {
-      s = { id, cwd: ev.cwd, state: 'idle', label: '', flash: null, gapUntil: 0, subagents: 0, updatedAt: now, tail: null };
+      s = { id, cwd: ev.cwd, state: 'idle', label: '', activity: null, flash: null, gapUntil: 0, subagents: 0, agents: new Map(), updatedAt: now, tail: null };
       this.sessions.set(id, s);
     }
     s.cwd = ev.cwd || s.cwd;
@@ -74,6 +117,17 @@ class AgentSessions {
     if (ev.transcript && !ev.agentId && s.tail?.path !== ev.transcript) s.tail = new TranscriptTail(ev.transcript);
     s.updatedAt = now;
     this.lastActivity = now;
+
+    // A subagent's own tool calls: they show on its chip in the team strip, not as the pet's own work.
+    if (ev.agentId && (ev.event === 'PreToolUse' || ev.event === 'PostToolUse')) {
+      const a = s.agents.get(ev.agentId);
+      if (a && ev.event === 'PreToolUse') a.label = toolLabel(ev.tool, ev.toolInput);
+      // The subagent's permission prompt was answered: the tool it asked for has run.
+      if (ev.event === 'PostToolUse' && s.state === 'permission') s.state = 'working';
+      if (s.state === 'idle' || s.state === 'thinking') s.state = 'working';
+      if (!s.activity) s.activity = 'agent';
+      return this.emit();
+    }
 
     switch (ev.event) {
       case 'SessionStart':
@@ -87,6 +141,7 @@ class AgentSessions {
       case 'UserPromptSubmit':
         s.state = 'thinking';
         s.label = '💭 思考中';
+        s.activity = null;
         s.flash = null;
         // Whatever the transcript said before this prompt (an earlier interrupt) is history.
         if (s.tail) s.tail = new TranscriptTail(s.tail.path);
@@ -101,6 +156,7 @@ class AgentSessions {
         }
         s.state = 'working';
         s.label = toolLabel(ev.tool, ev.toolInput);
+        s.activity = toolActivity(ev.tool);
         break;
       case 'PostToolUse':
         // A tool that finished was approved (or its question answered): stop asking.
@@ -118,7 +174,7 @@ class AgentSessions {
         break;
       case 'PermissionRequest':
         s.state = 'permission';
-        s.label = `🙋 请求授权 ${ev.tool || ''}`.trim();
+        s.label = permissionLabel(ev.tool, ev.toolInput);
         break;
       case 'Notification':
         if (WAITING_NOTIFICATIONS[ev.notificationType]) {
@@ -146,19 +202,26 @@ class AgentSessions {
         break;
       case 'SubagentStart':
         s.subagents += 1;
+        if (ev.agentId) s.agents.set(ev.agentId, { id: ev.agentId, type: ev.agentType || '', label: '', since: now });
         s.state = 'working';
+        s.activity = 'agent';
         s.label = `🧑‍🤝‍🧑 子 Agent ×${s.subagents}`;
         break;
       case 'SubagentStop':
         s.subagents = Math.max(0, s.subagents - 1);
+        if (ev.agentId) s.agents.delete(ev.agentId);
+        else if (s.agents.size > s.subagents) s.agents.delete([...s.agents.keys()][0]);
+        if (s.subagents > 0 && s.state === 'working') s.label = `🧑‍🤝‍🧑 子 Agent ×${s.subagents}`;
         break;
       case 'PreCompact':
         s.state = 'thinking';
+        s.activity = 'tidy';
         s.label = '🧹 整理上下文';
         break;
       case 'Stop':
         s.state = 'idle';
         s.subagents = 0;
+        s.agents.clear();
         s.flash = { state: 'done', until: now + FLASH_MS.done };
         s.label = '✅ 完成';
         break;
@@ -166,18 +229,21 @@ class AgentSessions {
       case 'Interrupt':
         s.state = 'idle';
         s.subagents = 0;
+        s.agents.clear();
         s.flash = null;
         s.label = '';
         break;
       case 'StopFailure':
         s.state = 'idle';
         s.subagents = 0;
+        s.agents.clear();
         s.flash = { state: 'error', until: now + FLASH_MS.error };
         s.label = `⚠️ ${ev.errorType || '出错了'}`;
         break;
       default:
         return; // PostCompact etc.: bookkeeping only
     }
+    if (s.state !== 'working' && s.state !== 'thinking') s.activity = null;
     this.emit();
   }
 
@@ -193,10 +259,13 @@ class AgentSessions {
           // Esc: the turn is over, and Stop never fires for it.
           s.state = 'idle';
           s.subagents = 0;
+          s.agents.clear();
+          s.activity = null;
           s.label = '⏹ 已中断';
         } else {
           // Permission denied: the agent reads the refusal and either carries on or stops.
           s.state = 'thinking';
+          s.activity = null;
           s.label = '🙅 被拒绝了';
         }
         console.log(`[transcript] ${s.id.slice(0, 8)} ${kind}`);
@@ -213,6 +282,7 @@ class AgentSessions {
       if (s.gapUntil && now >= s.gapUntil && s.state === 'working' && s.subagents === 0) {
         s.state = 'thinking';
         s.label = '💭 思考中';
+        s.activity = null;
         s.gapUntil = 0;
         changed = true;
       }
@@ -242,21 +312,44 @@ class AgentSessions {
     }
     if (!best) {
       const asleep = now - this.lastActivity > SLEEP_AFTER_MS;
-      return { state: asleep ? 'sleep' : 'idle', settle: asleep ? 'sleep' : 'idle', label: '' };
+      return { state: asleep ? 'sleep' : 'idle', settle: asleep ? 'sleep' : 'idle', label: '', activity: null, team: [] };
     }
     const { s, state } = best;
     let settle = s.state;
-    if (state === 'idle' && now - this.lastActivity > SLEEP_AFTER_MS) return { state: 'sleep', settle: 'sleep', label: '💤' };
+    const team = this.team(s);
+    if (state === 'idle' && now - this.lastActivity > SLEEP_AFTER_MS) return { state: 'sleep', settle: 'sleep', label: '💤', activity: null, team };
     // Name the project only when sessions are in different ones.
     const projects = new Set([...this.sessions.values()].map((x) => x.cwd));
     const multi = projects.size > 1 && s.cwd ? `${base(s.cwd)} · ` : '';
-    return { state, settle, label: s.label ? multi + s.label : '' };
+    const activity = state === 'working' || state === 'thinking' ? s.activity : null;
+    return { state, settle, label: s.label ? multi + s.label : '', activity, team };
+  }
+
+  /**
+   * Everyone else at work, for the team strip beside the pet: the shown session's
+   * subagents, then the other sessions that are busy or waiting on you.
+   */
+  team(shown) {
+    const out = [];
+    for (const s of this.sessions.values()) {
+      for (const a of s.agents.values()) {
+        out.push({ id: a.id, kind: 'subagent', icon: agentIcon(a.type), name: a.type || '子 Agent', label: a.label, state: 'working' });
+      }
+    }
+    for (const s of this.sessions.values()) {
+      if (s === shown) continue;
+      const state = s.flash ? s.flash.state : s.state;
+      if (state === 'idle' || state === 'sleep' || state === 'greet') continue;
+      out.push({ id: s.id, kind: 'session', icon: '💼', name: base(s.cwd) || '会话', label: s.label, state });
+    }
+    return out.slice(0, 8);
   }
 
   emit() {
     const v = this.view();
-    const last = this.lastView;
-    if (last && last.state === v.state && last.settle === v.settle && last.label === v.label) return;
+    const key = JSON.stringify(v);
+    if (key === this.lastKey) return;
+    this.lastKey = key;
     this.lastView = v;
     this.onChange(v);
   }
@@ -277,4 +370,4 @@ class AgentSessions {
   }
 }
 
-module.exports = { AgentSessions, toolLabel };
+module.exports = { AgentSessions, toolLabel, toolActivity, permissionLabel };

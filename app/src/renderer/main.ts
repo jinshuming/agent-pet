@@ -8,6 +8,7 @@ import {
   SIT_YAW_DEG,
   WALK_SPEED_MPS,
   WALK_YAW_DEG,
+  type Activity,
   type AgentState,
   type ClipName,
   type Reaction,
@@ -15,9 +16,10 @@ import {
 } from './pet/clips';
 import { REACTION_LINES, SPIN_LINES, pick } from './pet/lines';
 import { CHARACTERS, findCharacter, loadLocalCharacters } from './pet/characters';
+import { TeamStrip, type TeamMember } from './pet/team';
 import { SplatPetRenderer, type BodyPart } from './render/SplatPetRenderer';
 
-type AgentView = { state: AgentState; settle: AgentState; label: string };
+type AgentView = { state: AgentState; settle: AgentState; label: string; activity?: Activity | null; team?: TeamMember[] };
 type MenuItem = { id: string; label: string };
 type Preview = { kind: 'reaction' | 'clip'; id: string } | { kind: 'rest'; id: 'sit' | 'sleep' };
 /** From main, which flies the window: see "Physics" in main.cjs. */
@@ -56,8 +58,14 @@ await loadLocalCharacters();
 let character = findCharacter(new URLSearchParams(location.search).get('character'));
 const DRAG_THRESHOLD_PX = 4;
 const MULTI_CLICK_MS = 320;
-const MAX_YAW_DEG = 35;
 const TINY_HEIGHT_PX = 170;
+/**
+ * Looking at the cursor. `depth`: how far away "you" sit, in window heights (sets how far
+ * he turns for a given offset). He turns his head up to `headYaw`, his body up to `bodyYaw`
+ * (the body follows the head, more slowly). With the cursor still for `parkedMs` while he
+ * has nothing to do, his eyes start to wander.
+ */
+const GAZE = { depth: 1.1, headYaw: 50, bodyYaw: 28, pitchUp: 25, pitchDown: 30, parkedMs: 5000 };
 // Frame budget: smooth while something fast happens, relaxed otherwise. At 30 fps the
 // renderer + GPU cost is about half of 60; asleep it barely moves, so 15 is plenty.
 const FPS = { lively: 60, calm: 30, asleep: 15 };
@@ -76,6 +84,7 @@ const DIZZY_SWAY_DEG = 9;
 const bridge = window.petBridge;
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
 const bubble = document.getElementById('bubble') as HTMLDivElement;
+const team = new TeamStrip(document.getElementById('team') as HTMLDivElement);
 
 function setBubble(text: string): void {
   bubble.textContent = text;
@@ -113,7 +122,12 @@ function nearestWall(): Wall {
   const cx = window.screenX + window.innerWidth / 2;
   return cx - left < left + s.availWidth - cx ? 'left' : 'right';
 }
-bridge.onAgentState((v) => pet.setAgentState(v.state, v.settle, v.label));
+bridge.onAgentState((v) => {
+  document.body.dataset.state = v.state; // the bubble turns urgent while the agent waits on you
+  pet.setAgentState(v.state, v.settle, v.label, v.activity ?? null);
+  // A subagent came back: he nods at its report. (One going out plays with the `agent` activity.)
+  if (team.update(v.team ?? []).finished) pet.teamReport();
+});
 // Right-click menu previews: play any reaction or single clip once.
 bridge.onPreview((p) => {
   // Right-click → 模拟互动 → 休息: pretend he's been left alone that long.
@@ -160,6 +174,7 @@ bridge.ready(); // main replays the current agent state now that we can show it
     measureClips: () => renderer.measureClips(),
     stats: () => renderer.stats(),
     bones: () => renderer.boneNames(),
+    pet: () => pet.debugState(),
     setFps: (fps: number) => {
       fpsOverride = fps || null;
       if (fps) renderer.setTargetFps(fps);
@@ -425,13 +440,68 @@ function dizzySway(now: number): { pitch: number; roll: number } {
   return { roll: amp * Math.sin(t * 2.3), pitch: amp * 0.55 * Math.sin(t * 1.55 + 1.1) };
 }
 
-// ---------- look toward the cursor + keep the bubble above the head ----------
-let targetYaw = 0;
-let yaw = 0;
-bridge.onCursor(({ x, w }) => {
-  const nx = (x - w / 2) / (w * 1.5);
-  targetYaw = Math.max(-MAX_YAW_DEG, Math.min(MAX_YAW_DEG, nx * 2 * MAX_YAW_DEG));
+// ---------- gaze: he looks at the cursor, head first and the body after it ----------
+/** Window coordinates, from main (so it works with the cursor anywhere on screen). */
+let cursor = { x: 0, y: 0 };
+let cursorMovedAt = 0;
+bridge.onCursor(({ x, y }) => {
+  if (Math.hypot(x - cursor.x, y - cursor.y) > 3) cursorMovedAt = performance.now();
+  cursor = { x, y };
 });
+let headYaw = 0;
+let headPitch = 0;
+let bodyYaw = 0;
+/** Where his eyes wandered to while the cursor sits still. */
+let wander: { x: number; y: number; until: number } | null = null;
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+const DEG = 180 / Math.PI;
+
+function gazeTarget(now: number, head: { x: number; y: number }, canWander: boolean): { x: number; y: number } {
+  if (!canWander || now - cursorMovedAt < GAZE.parkedMs) {
+    wander = null;
+    return cursor;
+  }
+  if (!wander || now > wander.until) {
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    // Mostly somewhere around the desk, now and then a glance back at where the cursor sits.
+    wander =
+      Math.random() < 0.3
+        ? { ...cursor, until: now + 1500 + Math.random() * 2000 }
+        : {
+            x: head.x + (Math.random() * 2 - 1) * w * 1.2,
+            y: head.y + (Math.random() * 1.2 - 0.4) * h * 0.5,
+            until: now + 1200 + Math.random() * 2600,
+          };
+  }
+  return wander;
+}
+
+/**
+ * Turn the head toward the cursor (or wherever his eyes wandered), and return how far the body
+ * turns with it. `turned`: how far the body is already turned for other reasons (sitting sideways
+ * against a wall), which the head makes up for.
+ */
+function stepGaze(now: number, dt: number, allowed: boolean, turned: number): number {
+  const g = pet.gaze;
+  const head = renderer.headScreen();
+  let yaw = 0;
+  let pitch = 0;
+  if (allowed && head && (g.head > 0 || g.body > 0)) {
+    const t = gazeTarget(now, head, g.wander);
+    const d = canvas.clientHeight * GAZE.depth;
+    yaw = clamp(Math.atan2(t.x - head.x, d) * DEG, -(GAZE.headYaw + GAZE.bodyYaw), GAZE.headYaw + GAZE.bodyYaw);
+    pitch = clamp(Math.atan2(head.y - t.y, d) * DEG, -GAZE.pitchDown, GAZE.pitchUp);
+  }
+  const body = allowed ? clamp(yaw * 0.55, -GAZE.bodyYaw, GAZE.bodyYaw) * g.body : 0;
+  bodyYaw += (body - bodyYaw) * Math.min(1, dt * (g.fast ? 4 : 2.2));
+  const k = Math.min(1, dt * (g.fast ? 12 : 7));
+  const headTarget = allowed ? clamp(yaw - bodyYaw - turned, -GAZE.headYaw, GAZE.headYaw) * g.head : 0;
+  headYaw += (headTarget - headYaw) * k;
+  headPitch += ((allowed ? pitch * g.head : 0) - headPitch) * k;
+  renderer.setLook(headYaw, headPitch);
+  return bodyYaw;
+}
 
 // ---------- physics (main flies the window; we play along) ----------
 /**
@@ -466,6 +536,7 @@ function restYawTarget(): number {
 }
 
 let lastFrame = performance.now();
+let bubbleY: number | null = null;
 function frame(now: number): void {
   const dt = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
@@ -479,8 +550,8 @@ function frame(now: number): void {
   stepSpin(dt);
   const sway = dizzySway(now);
   const dizzy = sway.pitch !== 0 || sway.roll !== 0;
-  const lookAllowed =
-    !press?.dragging && !pet.isAirborne && !pet.isLeaning && !pet.isResting && !isSpinning() && !dizzy && pet.agentState !== 'sleep';
+  // Spinning or reeling, he isn't looking at anything. pet.gaze decides the rest.
+  const lookAllowed = !press?.dragging && !isSpinning() && !dizzy;
   // Reach up to the menu bar while hanging (hands pinned to it); ease back down once he lets go.
   pet.hangTick(now);
   let liftTarget = 0;
@@ -495,7 +566,7 @@ function frame(now: number): void {
     renderer.setLift(lift);
     appliedLift = lift;
   }
-  yaw += ((lookAllowed ? targetYaw : 0) - yaw) * 0.12;
+  const yaw = stepGaze(now, dt, lookAllowed, restYaw);
   renderer.setYaw(spin + yaw + restYaw, sway.pitch, sway.roll);
   const lively =
     !!press || hover !== null || pet.isAirborne || pet.isWalking || isSpinning() || dizzy || Math.abs(lift - liftTarget) > 0.002;
@@ -503,8 +574,15 @@ function frame(now: number): void {
   renderer.setTargetFps(fpsOverride ?? (lively ? FPS.lively : asleep ? FPS.asleep : FPS.calm));
   const top = renderer.headTopScreen();
   if (top) {
+    // Above his head, or above his hands when they're up (waving, pleading); eased so it doesn't jitter.
+    const hand = pet.isHanging ? null : renderer.topHandY();
+    const y = hand === null ? top.y : Math.min(top.y, hand - 12);
+    bubbleY = bubbleY === null ? y : bubbleY + (y - bubbleY) * Math.min(1, dt * 6);
     bubble.style.left = `${top.x}px`;
-    bubble.style.top = `${Math.max(4, top.y)}px`;
+    bubble.style.top = `${Math.max(4, bubbleY)}px`;
+    // The team gathers beside him, on the side away from the nearest screen edge.
+    const head = renderer.headScreen();
+    if (head) team.place(nearestWall() === 'left' ? 'right' : 'left', head.y + (head.y - top.y) * 0.6);
   }
   requestAnimationFrame(frame);
 }
