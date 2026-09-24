@@ -1,0 +1,32 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npm run typecheck
+      - name: Main-process and plugin scripts parse
+        run: for f in src/main/*.cjs scripts/*.mjs ../plugin/scripts/*.mjs ../scripts/*.mjs; do node --check "$f"; done
+      # Users run the committed dist/ (they only install Electron), so it must match src/.
+      - name: dist/ is up to date
+        run: |
+          npm run build
+          git diff --exit-code -- dist || { echo "::error::dist/ is stale: run 'npm run build' in app/ and commit it"; exit 1; }
+      - name: Clips are slimmed to the 86-bone rig
+        run: node scripts/slim-clips.mjs assets/motions/*.glb | grep -v "already 86 joints" && exit 1 || true

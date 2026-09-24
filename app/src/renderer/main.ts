@@ -14,7 +14,7 @@ import {
   type Wall,
 } from './pet/clips';
 import { REACTION_LINES, SPIN_LINES, pick } from './pet/lines';
-import { CHARACTERS, findCharacter } from './pet/characters';
+import { CHARACTERS, findCharacter, loadLocalCharacters } from './pet/characters';
 import { SplatPetRenderer, type BodyPart } from './render/SplatPetRenderer';
 
 type AgentView = { state: AgentState; settle: AgentState; label: string };
@@ -52,11 +52,15 @@ declare global {
 }
 
 // The main process passes the saved choice as ?character=<id>; see pet/characters.ts.
+await loadLocalCharacters();
 let character = findCharacter(new URLSearchParams(location.search).get('character'));
 const DRAG_THRESHOLD_PX = 4;
 const MULTI_CLICK_MS = 320;
 const MAX_YAW_DEG = 35;
 const TINY_HEIGHT_PX = 170;
+// Frame budget: smooth while something fast happens, relaxed otherwise. At 30 fps the
+// renderer + GPU cost is about half of 60; asleep it barely moves, so 15 is plenty.
+const FPS = { lively: 60, calm: 30, asleep: 15 };
 // Spin game: ⌥-drag or a sideways two-finger swipe spins him; enough turns make him dizzy.
 const SPIN_DEG_PER_PX = 0.9;
 const SPIN_DEG_PER_WHEEL = 0.6;
@@ -151,8 +155,18 @@ bridge.onSetCharacter((id) => {
   })().finally(() => (swapping = null));
 });
 bridge.ready(); // main replays the current agent state now that we can show it
-// Dev server only (the packaged app loads from file://).
-if (location.protocol.startsWith('http')) (window as unknown as { __petDebug: unknown }).__petDebug = { measureClips: () => renderer.measureClips() };
+// Reached only through the control server's /debug endpoints (dev, or AGENT_PET_DEBUG=1).
+(window as unknown as { __petDebug: unknown }).__petDebug = {
+    measureClips: () => renderer.measureClips(),
+    stats: () => renderer.stats(),
+    bones: () => renderer.boneNames(),
+    setFps: (fps: number) => {
+      fpsOverride = fps || null;
+      if (fps) renderer.setTargetFps(fps);
+    },
+  };
+/** Dev (/debug/fps): pin the frame budget instead of letting the pet's state choose it. */
+let fpsOverride: number | null = null;
 
 // ---------- window size ----------
 // Pin the canvas to the size main intends. On Windows a move can nudge the window by a pixel
@@ -242,8 +256,10 @@ window.addEventListener('pointermove', (e) => {
     }
     return;
   }
-  setHover(hoverAt(e.clientX, e.clientY));
+  // Hit-testing reads a pixel back from the GPU: do it once per frame, not per mouse event.
+  pendingHover = { x: e.clientX, y: e.clientY };
 });
+let pendingHover: { x: number; y: number } | null = null;
 
 window.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
@@ -455,6 +471,8 @@ function frame(now: number): void {
   lastFrame = now;
   if (dragPending && press?.dragging && !press.spin) bridge.dragMove();
   dragPending = false;
+  if (pendingHover && !press) setHover(hoverAt(pendingHover.x, pendingHover.y));
+  pendingHover = null;
   if (!pet.isFree) lastTouched = now;
   pet.restTick(now - lastTouched);
   restYaw += (restYawTarget() - restYaw) * Math.min(1, dt * 5);
@@ -479,6 +497,10 @@ function frame(now: number): void {
   }
   yaw += ((lookAllowed ? targetYaw : 0) - yaw) * 0.12;
   renderer.setYaw(spin + yaw + restYaw, sway.pitch, sway.roll);
+  const lively =
+    !!press || hover !== null || pet.isAirborne || pet.isWalking || isSpinning() || dizzy || Math.abs(lift - liftTarget) > 0.002;
+  const asleep = pet.agentState === 'sleep' || pet.restPose?.rest === 'asleep';
+  renderer.setTargetFps(fpsOverride ?? (lively ? FPS.lively : asleep ? FPS.asleep : FPS.calm));
   const top = renderer.headTopScreen();
   if (top) {
     bubble.style.left = `${top.x}px`;

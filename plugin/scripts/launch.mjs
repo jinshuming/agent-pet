@@ -5,23 +5,22 @@
 // plugin (a git checkout, --plugin-dir, or the Codex install script), or the
 // Claude Code marketplace clone. Set AGENT_PET_NO_LAUNCH=1 to never auto-start.
 //
-// The first start runs `npm install` in the app (Electron is a few hundred MB),
-// so the pet shows up a minute or two after the first session instead of at once.
+// The app's own scripts/start.mjs installs Electron on first run (a minute or two)
+// and launches it; this hook only finds it and hands off, so it returns at once.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, openSync, readFileSync, renameSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PORT = Number(process.env.AGENT_PET_PORT || 23456);
 const here = dirname(fileURLToPath(import.meta.url));
-const stateDir = join(homedir(), '.agent-pet');
-/** Another session's install is still running if its marker is younger than this. */
-const INSTALL_STALE_MS = 10 * 60 * 1000;
+/** The log is kept to one file of this size plus one older one. */
+const LOG_MAX_BYTES = 5 * 1024 * 1024;
 
 function recordedAppDir() {
   try {
-    return JSON.parse(readFileSync(join(stateDir, 'app.json'), 'utf8')).appDir;
+    return JSON.parse(readFileSync(join(homedir(), '.agent-pet', 'app.json'), 'utf8')).appDir;
   } catch {
     return undefined;
   }
@@ -36,7 +35,7 @@ const appDir = [
 ]
   .filter(Boolean)
   .map((d) => resolve(d))
-  .find((d) => existsSync(join(d, 'package.json')));
+  .find((d) => existsSync(join(d, 'scripts', 'start.mjs')));
 
 async function isRunning() {
   try {
@@ -49,42 +48,28 @@ async function isRunning() {
   }
 }
 
-/** True while some session's first-time `npm install` is in progress (so we don't start a second). */
-function installing() {
+function openLog() {
+  const file = join(tmpdir(), 'agent-pet.log');
   try {
-    return Date.now() - statSync(join(stateDir, 'installing')).mtimeMs < INSTALL_STALE_MS;
+    if (statSync(file).size > LOG_MAX_BYTES) renameSync(file, `${file}.old`);
   } catch {
-    return false;
+    // no log yet
   }
+  return openSync(file, 'a');
 }
-
-const q = (s) => `'${String(s).replaceAll("'", `'\\''`)}'`;
 
 try {
   if (!process.env.AGENT_PET_NO_LAUNCH && appDir && !(await isRunning())) {
-    const log = openSync(join(tmpdir(), 'agent-pet.log'), 'a');
+    const log = openLog();
     const env = { ...process.env, AGENT_PET_PORT: String(PORT) };
-    const node = process.execPath;
-    const dev = join(appDir, 'scripts', 'dev.mjs');
-    if (existsSync(join(appDir, 'node_modules', 'electron'))) {
-      spawn(node, [dev], { cwd: appDir, detached: true, stdio: ['ignore', log, log], env }).unref();
-    } else if (!installing()) {
-      // First run: install, then start. npm sits next to the node that runs this hook.
-      mkdirSync(stateDir, { recursive: true });
-      const marker = join(stateDir, 'installing');
-      writeFileSync(marker, String(Date.now()));
-      const npm = join(dirname(node), 'npm');
-      const script =
-        `echo "[agent-pet] first run: npm install in ${appDir}"; ` +
-        `${existsSync(npm) ? q(npm) : 'npm'} install --no-audit --no-fund; code=$?; rm -f ${q(marker)}; ` +
-        `[ $code -eq 0 ] && exec ${q(node)} ${q(dev)}`;
-      spawn('/bin/sh', ['-c', script], {
-        cwd: appDir,
-        detached: true,
-        stdio: ['ignore', log, log],
-        env: { ...env, PATH: `${dirname(node)}:${env.PATH ?? ''}` },
-      }).unref();
-    }
+    delete env.ELECTRON_RUN_AS_NODE; // set in VS Code / Cursor terminals; would start Electron as plain Node
+    spawn(process.execPath, [join(appDir, 'scripts', 'start.mjs')], {
+      cwd: appDir,
+      detached: true,
+      stdio: ['ignore', log, log],
+      env,
+      windowsHide: true,
+    }).unref();
   }
 } catch {
   // Never fail the session because the pet couldn't start.

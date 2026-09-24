@@ -12,9 +12,11 @@ scripts/   install-codex.mjs
 
 ## Requirements
 
-- macOS (the pet is developed and tested there)
+- macOS or Windows 10/11 (developed on macOS; Windows is supported but less tested)
 - Node.js 20 or newer on your `PATH`
-- About 600 MB of disk for the app's dependencies (Electron), installed automatically on first run
+- About 350 MB of disk for Electron, the one runtime dependency, installed automatically on first run (if its download from GitHub fails, it retries through the npmmirror.com mirror)
+
+It is light enough to leave running all day: about 8% of one CPU core while idle (it draws at 30 fps, 60 while you play with it, 15 asleep) and about 850 MB of memory across its processes. Its tray / menu-bar icon (a paw) shows, hides, brings back or quits it.
 
 ## Install for Claude Code
 
@@ -46,10 +48,10 @@ Claude Code and Codex can run side by side: every session feeds the same pet, an
 | Click its head / body | Shy squirm / ticklish jolt. While the agent is busy: "wait a moment!" |
 | Double / triple click | Poses for a photo / makes a big heart |
 | Drag it | Flails in mid-air. Throw it and it flies, bounces off the screen sides, lands (dizzy if it lands hard) |
-| Throw it at the top of the screen | It grabs the edge and hangs there until its arms get tired |
+| Throw it at the top of the screen | It hangs from the edge: two hands, then after 15 s one, then it drops. Slow pokes make it struggle (and tire faster); four quick clicks knock it off |
 | Set it down by a side of the screen | It leans on the wall |
-| ⌥-drag sideways, or swipe two fingers sideways | Spins it. Three turns and it staggers around dizzy |
-| Pinch, or ⌘-scroll, over it | Resizes it |
+| Drag sideways in the empty space right beside it, ⌥/Alt-drag it, or swipe two fingers sideways | Spins it, harder the faster you swipe. Three turns and it staggers around dizzy |
+| Pinch, or ⌘/Ctrl-scroll, over it | Resizes it (10%–250%; right-click → 大小 → 自定义… for an exact size) |
 | Leave it alone for 3 min / 8 min | Walks to the nearest wall and sits / dozes off there. Touch it and it gets up |
 | Right-click it | Switch character, change size, preview every state and motion |
 
@@ -72,9 +74,11 @@ Claude Code / Codex hook (async) → plugin/scripts/emit.mjs → POST 127.0.0.1:
 
 ```bash
 cd app && npm install
-npm run dev                         # run the pet by hand
+npm run dev                         # the pet on the Vite dev server, with hot reload and /debug endpoints
 claude --plugin-dir ../plugin       # a Claude Code session wired to this checkout
 ```
+
+Users run the built renderer in `app/dist/` (committed, so they only install Electron). After changing anything under `app/src/renderer/`, run `npm run build` and commit `dist/` with it; CI fails when they drift apart. New PINOC clips go through `npm run slim-clips` (see [docs/motion-design.md](docs/motion-design.md)). Set `AGENT_PET_DEBUG=1` to log every hook event and renderer message to `$TMPDIR/agent-pet.log`.
 
 Motion clips and how they were made, picked and fixed up are in [docs/motion-design.md](docs/motion-design.md).
 

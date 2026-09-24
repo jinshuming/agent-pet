@@ -3,13 +3,6 @@
 
 export const CLIP_FILES = {
   idle: 'motions/idle.glb',
-  wave: 'motions/wave.glb',
-  cheer: 'motions/cheer.glb',
-  clap: 'motions/clap.glb',
-  nod: 'motions/nod.glb',
-  jump: 'motions/jump.glb',
-  headHit: 'motions/head-hit.glb',
-  hitFront: 'motions/hit-front.glb',
   hang: 'motions/hang.glb',
   // * generated (P0)
   typing: 'motions/work-typing.glb',
@@ -61,13 +54,6 @@ export type ClipName = keyof typeof CLIP_FILES;
 /** Right-click "预览单个动作" labels; ✨ marks clips generated for this pet. */
 export const CLIP_LABELS: Record<ClipName, string> = {
   idle: '站立待机',
-  wave: '挥手',
-  cheer: '欢呼',
-  clap: '鼓掌',
-  nod: '点头',
-  jump: '跳一下',
-  headHit: '被敲头',
-  hitFront: '被撞踉跄',
   hang: '挂在屏幕顶上',
   typing: '✨ 疯狂敲键盘',
   interrupted: '✨ 被打扰·等一下',

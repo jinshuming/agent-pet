@@ -12,5 +12,6 @@ export default defineConfig({
   // pre-bundling would break that relative URL.
   optimizeDeps: { exclude: ['@viggle/splat-engine'] },
   server: { port: 5199, strictPort: true },
-  build: { outDir: r('./dist'), emptyOutDir: true, target: 'es2022' },
+  // The packaged app serves assets/ itself (pet:// in main.cjs), so they aren't copied into dist.
+  build: { outDir: r('./dist'), emptyOutDir: true, target: 'es2022', copyPublicDir: false, reportCompressedSize: false, chunkSizeWarningLimit: 4000 },
 });

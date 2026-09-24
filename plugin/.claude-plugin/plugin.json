@@ -1,7 +1,7 @@
 {
   "name": "agent-pet",
   "displayName": "Agent Pet",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A 3D Gaussian-splat desktop pet that acts out what your coding agent (Claude Code or Codex) is doing.",
   "author": {
     "name": "Shuming Jin"

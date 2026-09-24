@@ -33,6 +33,18 @@ export class SplatPetRenderer {
   /** Camera height chosen by autoFrame; setLift offsets from it. */
   private framedCamY: number | null = null;
 
+  // ---------- frame budget ----------
+  // A desktop pet runs all day next to real work, so it renders at `targetFps`
+  // (the caller lowers it while nothing fast is happening) instead of the display's
+  // 60–120 Hz. Frames in between skip both the draw and the skinning.
+  private targetFps = 60;
+  private lastRenderAt = 0;
+  /** Frames autoFrame / measureClips need drawn no matter the budget. */
+  private forceRender = 0;
+  private displayDt = 1000 / 60;
+  private lastTickAt = 0;
+  private renders: number[] = [];
+
   private constructor(
     private readonly scene: Scene,
     private character: Character,
@@ -40,7 +52,62 @@ export class SplatPetRenderer {
     private readonly loadedClips: ReadonlySet<ClipName>,
   ) {
     this.findBones();
-    scene.app.on('update', () => this.tickSequence());
+    scene.app.autoRender = false;
+    scene.app.on('update', () => {
+      this.tickSequence();
+      this.budgetFrame();
+    });
+  }
+
+  /** Render (and skin) this frame only if it's due under the frame budget. */
+  private budgetFrame(): void {
+    const now = performance.now();
+    if (this.lastTickAt) this.displayDt += (Math.min(100, now - this.lastTickAt) - this.displayDt) * 0.05;
+    this.lastTickAt = now;
+    const interval = 1000 / this.targetFps;
+    // Half a display frame of slack, so 30 fps on a 60 Hz display lands on every other frame.
+    const due = this.forceRender > 0 || now - this.lastRenderAt >= interval - this.displayDt / 2;
+    if (!due) return;
+    if (this.forceRender > 0) this.forceRender--;
+    this.lastRenderAt = now;
+    this.scene.app.renderNextFrame = true;
+    this.renders.push(now);
+    if (this.renders.length > 240) this.renders.shift();
+  }
+
+  /** Frames per second to draw (10–120). Skinning follows, so skipped frames cost almost nothing. */
+  setTargetFps(fps: number): void {
+    const next = Math.min(120, Math.max(10, Math.round(fps)));
+    if (next === this.targetFps) return;
+    this.targetFps = next;
+    this.applySkinningRate();
+  }
+
+  get fps(): number {
+    return this.targetFps;
+  }
+
+  /** Pose evaluation + skinning only on the frames that get drawn. */
+  private applySkinningRate(): void {
+    const displayFps = 1000 / this.displayDt;
+    this.character.armature.updateInterval = Math.max(1, Math.round(displayFps / this.targetFps));
+  }
+
+  /** Dev: the bones this character's splats are bound to (a subset of the clips' 441). */
+  boneNames(): string[] {
+    return [...this.character.armature.boneNames];
+  }
+
+  /** Dev: measured draw rate over the last second and the JS heap. */
+  stats(): { renderFps: number; displayFps: number; targetFps: number; heapMB: number | null } {
+    const now = performance.now();
+    const perf = performance as Performance & { memory?: { usedJSHeapSize: number } };
+    return {
+      renderFps: this.renders.filter((t) => now - t <= 1000).length,
+      displayFps: Math.round(1000 / this.displayDt),
+      targetFps: this.targetFps,
+      heapMB: perf.memory ? Math.round(perf.memory.usedJSHeapSize / 1048576) : null,
+    };
   }
 
   private findBones(): void {
@@ -59,12 +126,15 @@ export class SplatPetRenderer {
    * through the scene's animation library. Re-frames the camera for the new body.
    * The caller re-applies whatever motion should play afterwards.
    */
+  // loadVsplat, not load: Character.load keeps every file's bytes in a process-wide cache,
+  // so each character swap used to leave ~100 MB behind.
   async setCharacter(characterUrl: string): Promise<void> {
-    const next = await Character.load(this.scene, characterUrl);
+    const next = await Character.loadVsplat(this.scene, characterUrl);
     const old = this.character;
     this.character = next;
     old.destroy();
     this.findBones();
+    this.applySkinningRate();
     this.setYaw(0);
     this.play([{ clip: 'idle', loop: true }]);
     await this.autoFrame();
@@ -86,7 +156,7 @@ export class SplatPetRenderer {
 
     const clipEntries = Object.entries(CLIP_FILES) as [ClipName, string][];
     const [character, ...clipResults] = await Promise.all([
-      Character.load(scene, characterUrl),
+      Character.loadVsplat(scene, characterUrl),
       // One missing or broken clip must not take the whole pet down.
       ...clipEntries.map(([name, url]) =>
         Animation.loadGlb(scene, url, name).then(
@@ -319,6 +389,7 @@ export class SplatPetRenderer {
     const h = this.canvas.height;
     const out: Record<string, { top: number; bottom: number; left: number; right: number; clipped: boolean }> = {};
     const saved = { seq: this.seq, index: this.seqIndex, done: this.onSeqDone };
+    this.forceRender = Number.MAX_SAFE_INTEGER;
     this.setYaw(0);
     for (const clip of this.loadedClips) {
       this.play([{ clip, loop: false }]);
@@ -343,6 +414,7 @@ export class SplatPetRenderer {
         clipped: minY <= 0 || minX <= 0 || maxY >= h - 1 || maxX >= w - 1,
       };
     }
+    this.forceRender = 0;
     this.seq = saved.seq;
     this.seqIndex = saved.index;
     this.onSeqDone = saved.done;
@@ -355,6 +427,15 @@ export class SplatPetRenderer {
    * any character size/proportion works. Two passes converge well enough.
    */
   private async autoFrame(): Promise<void> {
+    this.forceRender = Number.MAX_SAFE_INTEGER; // it reads back what was drawn, so draw every frame
+    try {
+      await this.frameCamera();
+    } finally {
+      this.forceRender = 0;
+    }
+  }
+
+  private async frameCamera(): Promise<void> {
     const nextFrames = (n: number) =>
       new Promise<void>((resolve) => {
         const step = () => (--n <= 0 ? resolve() : requestAnimationFrame(step));

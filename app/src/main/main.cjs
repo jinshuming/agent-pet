@@ -2,8 +2,46 @@
 // Transparent pixels pass clicks through to the desktop; the renderer decides
 // (per-pixel alpha) when the cursor is over the pet and asks us to capture input.
 const path = require('node:path');
-const { app, BrowserWindow, ipcMain, Menu, screen } = require('electron');
+const { pathToFileURL } = require('node:url');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, net, protocol, screen } = require('electron');
 const { AgentSessions } = require('./agent-sessions.cjs');
+
+const DEV = !!process.env.PET_DEV_URL;
+/** Every hook event and state change goes to the log only while developing (or with AGENT_PET_DEBUG=1). */
+const VERBOSE = DEV || !!process.env.AGENT_PET_DEBUG;
+const APP_DIR = path.resolve(__dirname, '..', '..');
+
+// The packaged renderer is served from pet://app/: the page and its scripts from dist/,
+// characters and motions straight from assets/ (so they aren't duplicated into dist).
+// A standard, secure scheme gets a real origin, fetch, CacheStorage and module workers.
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'pet', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
+]);
+const SERVE_ROOTS = [path.join(APP_DIR, 'dist'), path.join(APP_DIR, 'assets')];
+const CSP = [
+  "default-src 'none'",
+  "script-src 'self' 'wasm-unsafe-eval'",
+  "worker-src 'self' blob:",
+  "connect-src 'self' blob: data:",
+  "img-src 'self' blob: data:",
+  "style-src 'self' 'unsafe-inline'",
+].join('; ');
+
+function servePet(request) {
+  const rel = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, '');
+  for (const root of SERVE_ROOTS) {
+    const file = path.resolve(root, rel);
+    if (!file.startsWith(root + path.sep)) continue; // no ../ out of the roots
+    if (!require('node:fs').existsSync(file)) continue;
+    return net.fetch(pathToFileURL(file).toString()).then((res) => {
+      if (!file.endsWith('.html')) return res;
+      const headers = new Headers(res.headers);
+      headers.set('Content-Security-Policy', CSP);
+      return new Response(res.body, { status: res.status, headers });
+    });
+  }
+  return new Response('not found', { status: 404 });
+}
 
 // Much larger than the standing character: raised arms, jumps and drag poses
 // need room, and the transparent margin passes clicks through anyway.
@@ -29,7 +67,7 @@ function pushView(view) {
 let pinnedUntil = 0;
 
 const sessions = new AgentSessions((view) => {
-  console.log(`[agent] ${view.state}${view.settle !== view.state ? ` → ${view.settle}` : ''} ${view.label}`);
+  if (VERBOSE) console.log(`[agent] ${view.state}${view.settle !== view.state ? ` → ${view.settle}` : ''} ${view.label}`);
   if (Date.now() < pinnedUntil) return;
   pushView(view);
 });
@@ -130,7 +168,7 @@ function openSizeDialog() {
     maximizable: false,
     fullscreenable: false,
     alwaysOnTop: true,
-    webPreferences: { preload: path.join(__dirname, 'size-dialog-preload.cjs'), contextIsolation: true, nodeIntegration: false },
+    webPreferences: { preload: path.join(__dirname, 'size-dialog-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   sizeDialog.setMenu(null);
   sizeDialog.loadFile(path.join(__dirname, 'size-dialog.html'), {
@@ -178,9 +216,13 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       backgroundThrottling: false,
     },
   });
+  // The pet never opens windows or navigates anywhere.
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
   // The constructor clamps x/y to the work area; moving afterwards lets the
   // transparent bottom margin hang over the Dock.
   place(workArea.x + workArea.width - w - 40, workArea.y + workArea.height - h + feetGapPx(h));
@@ -189,9 +231,9 @@ function createWindow() {
   // Start fully click-through; `forward` keeps mousemove flowing so the renderer can hit-test.
   win.setIgnoreMouseEvents(true, { forward: true });
 
+  // Mirror renderer logs into the log while developing (or with AGENT_PET_DEBUG=1).
+  if (VERBOSE) win.webContents.on('console-message', (e) => console.log(`[renderer:${e.level}] ${e.message}`));
   if (process.env.PET_DEV_URL) {
-    // Mirror renderer logs into the terminal while developing.
-    win.webContents.on('console-message', (e) => console.log(`[renderer:${e.level}] ${e.message}`));
     // A clip requested before its file existed gets Vite's HTML fallback with a 200,
     // and splat-engine keeps asset bytes in CacheStorage with an expiry, so that stale
     // "GLB" would be replayed on every restart. Start each dev run with clean caches.
@@ -203,7 +245,9 @@ function createWindow() {
     );
     if (process.env.PET_DEVTOOLS) win.webContents.openDevTools({ mode: 'detach' });
   } else {
-    win.loadFile(path.join(__dirname, '../../dist/index.html'), characterId ? { query: { character: characterId } } : {});
+    const url = new URL('pet://app/index.html');
+    if (characterId) url.searchParams.set('character', characterId);
+    win.loadURL(url.toString());
   }
 
   // Global cursor position → renderer, so the pet can turn toward the mouse
@@ -460,7 +504,7 @@ ipcMain.on('pet:show-menu', (_e, catalog = {}) => {
         { label: '休息：走到墙边坐下', click: () => win?.webContents.send('pet:preview', { kind: 'rest', id: 'sit' }) },
         { label: '休息：靠墙睡着', click: () => win?.webContents.send('pet:preview', { kind: 'rest', id: 'sleep' }) },
         { type: 'separator' },
-        { label: '提示：按住 ⌥ 左右拖动，或双指左右滑动，让他转圈；转 3 圈他会晕', enabled: false },
+        { label: `提示：按住 ${process.platform === 'darwin' ? '⌥' : 'Alt'} 左右拖动，或在他身边空白处横向拖动，让他转圈；转 3 圈他会晕`, enabled: false },
         { label: '提示：3 分钟不理他会去墙边坐下，8 分钟会靠墙睡着', enabled: false },
       ],
     },
@@ -489,7 +533,7 @@ ipcMain.on('pet:show-menu', (_e, catalog = {}) => {
         { label: '最大（适配屏幕）', click: () => setScale(SCALE_MAX) },
         { label: '自定义…', click: () => openSizeDialog() },
         { type: 'separator' },
-        { label: '提示：在角色上双指捏合，或按住 ⌘ 滚动滚轮微调', enabled: false },
+        { label: `提示：在角色上双指捏合，或按住 ${process.platform === 'darwin' ? '⌘' : 'Ctrl'} 滚动滚轮微调`, enabled: false },
       ],
     },
     { type: 'separator' },
@@ -558,7 +602,7 @@ function startControlServer() {
         return reply(400, { error: err.message });
       }
       if (typeof ev?.event !== 'string') return reply(400, { error: 'missing event' });
-      console.log(`[event] ${String(ev.session).slice(0, 8)} ${ev.event}${ev.tool ? ` ${ev.tool}` : ''}${ev.notificationType ? ` ${ev.notificationType}` : ''}`);
+      if (VERBOSE) console.log(`[event] ${String(ev.session).slice(0, 8)} ${ev.event}${ev.tool ? ` ${ev.tool}` : ''}${ev.notificationType ? ` ${ev.notificationType}` : ''}`);
       sessions.handle(ev);
       return reply(200, { ok: true });
     }
@@ -675,7 +719,7 @@ function startControlServer() {
     }
 
     // {"state":"idle","ms":60000}: show this state and ignore live sessions for ms (0 = unpin).
-    if (process.env.PET_DEV_URL && req.method === 'POST' && url.pathname === '/debug/pin-state') {
+    if (VERBOSE && req.method === 'POST' && url.pathname === '/debug/pin-state') {
       let body;
       try {
         body = await readJson(req);
@@ -687,6 +731,35 @@ function startControlServer() {
       if (ms && VALID_STATES.has(body?.state)) pushView({ state: body.state, settle: body.state, label: '' });
       else if (!ms) pushView(sessions.view());
       return reply(200, { ok: true, pinnedMs: ms });
+    }
+
+    // Per-process CPU and memory (Electron's own accounting) plus the renderer's draw rate and JS heap.
+    if (VERBOSE && req.method === 'GET' && url.pathname === '/debug/stats') {
+      const procs = app.getAppMetrics().map((m) => ({
+        type: m.type,
+        cpu: Math.round(m.cpu.percentCPUUsage * 10) / 10,
+        memMB: Math.round((m.memory.workingSetSize || 0) / 1024),
+      }));
+      let renderer = null;
+      let bones;
+      try {
+        renderer = await win.webContents.executeJavaScript('window.__petDebug.stats()');
+        if (url.searchParams.get('bones')) bones = await win.webContents.executeJavaScript('window.__petDebug.bones()');
+      } catch {}
+      return reply(200, { procs, renderer, bones });
+    }
+
+    // {"fps":30}: pin the renderer's frame budget (0 = let the pet choose again).
+    if (VERBOSE && req.method === 'POST' && url.pathname === '/debug/fps') {
+      let body;
+      try {
+        body = await readJson(req);
+      } catch (err) {
+        return reply(400, { error: err.message });
+      }
+      const fps = Math.min(120, Math.max(0, Math.round(Number(body?.fps) || 0)));
+      await win.webContents.executeJavaScript(`window.__petDebug.setFps(${fps})`);
+      return reply(200, { ok: true, fps });
     }
 
     if (process.env.PET_DEV_URL && req.method === 'GET' && url.pathname === '/debug/extents') {
@@ -721,10 +794,56 @@ function recordAppLocation() {
   }
 }
 
+// ---------- Tray ----------
+// No Dock icon and no taskbar button: the tray is how you find, bring back or quit the pet.
+let tray = null;
+function createTray() {
+  // macOS: a black template image the menu bar tints. Windows: a coloured one that shows on any taskbar.
+  const icon = nativeImage.createFromPath(path.join(__dirname, process.platform === 'darwin' ? 'tray-icon.png' : 'tray-icon-win.png'));
+  if (process.platform === 'darwin') icon.setTemplateImage(true); // follows the menu bar's light/dark
+  tray = new Tray(icon);
+  tray.setToolTip('Agent Pet');
+  const menu = () =>
+    Menu.buildFromTemplate([
+      { label: win?.isVisible() ? '隐藏' : '显示', click: () => (win?.isVisible() ? win.hide() : win?.showInactive()) },
+      { label: '回到屏幕上', click: () => bringBack() },
+      { type: 'separator' },
+      { label: '退出 Agent Pet', click: () => app.quit() },
+    ]);
+  // Rebuilt on open so 显示/隐藏 is always right.
+  tray.on('click', () => tray.popUpContextMenu(menu()));
+  tray.on('right-click', () => tray.popUpContextMenu(menu()));
+}
+
+/** Put the pet back at its start spot on the primary display (lost off-screen, display unplugged). */
+function bringBack() {
+  if (!win) return;
+  stopPhysics();
+  const { workArea } = screen.getPrimaryDisplay();
+  const { width, height } = winSize();
+  place(workArea.x + workArea.width - width - 40, workArea.y + workArea.height - height + feetGapPx(height));
+  win.showInactive();
+  win.webContents.send('pet:physics', { kind: 'drop' });
+}
+
+/** After a display goes away, a pet left on it would be invisible: bring it back. */
+function onDisplaysChanged() {
+  if (!win) return;
+  const b = win.getBounds();
+  const cx = b.x + b.width / 2;
+  const feetY = b.y + b.height * FEET_AT;
+  const visible = screen.getAllDisplays().some(({ bounds: d }) => cx >= d.x && cx < d.x + d.width && feetY >= d.y && feetY < d.y + d.height);
+  if (!visible) bringBack();
+}
+
 app.whenReady().then(() => {
   if (process.platform === 'darwin') app.dock.hide();
+  protocol.handle('pet', servePet);
   recordAppLocation();
   createWindow();
+  createTray();
+  screen.on('display-removed', onDisplaysChanged);
+  screen.on('display-metrics-changed', onDisplaysChanged);
   startControlServer();
 });
 
