@@ -2,3 +2,7 @@ node_modules/
 logs/
 *.log
 .DS_Store
+
+# Characters kept to yourself (see app/src/renderer/pet/characters.ts)
+app/assets/characters/local.json
+app/assets/characters/local/
