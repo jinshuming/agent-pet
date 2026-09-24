@@ -22,7 +22,8 @@ export const CHARACTERS: CharacterInfo[] = [
   { id: 'miles-morales', name: 'Miles Morales', file: 'characters/miles-morales.vsplat', pinocId: 'd5a0b493-da67-4840-87a7-58b40dcc6216' },
 ];
 
-export const DEFAULT_CHARACTER = CHARACTERS[0];
+/** Worn on first launch, until the user picks one (then settings.json remembers it). */
+export const DEFAULT_CHARACTER = CHARACTERS.find((c) => c.id === 'young-man') ?? CHARACTERS[0];
 
 /** Add the characters listed in assets/characters/local.json, if there is one (it's gitignored). */
 export async function loadLocalCharacters(): Promise<void> {
