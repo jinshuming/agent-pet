@@ -1,7 +1,8 @@
-import { PetController } from './pet/Controller';
+import { PetController, type LetGoReason } from './pet/Controller';
 import {
   CLIP_LABELS,
   REACTION_LABELS,
+  HANG,
   REACTION_SEQUENCES,
   REST_MS,
   SIT_YAW_DEG,
@@ -30,9 +31,12 @@ declare global {
     petBridge: {
       setInteractive(interactive: boolean): void;
       moveBy(dx: number, dy: number): void;
+      dragBegin(): void;
+      dragMove(): void;
+      onSize(cb: (s: { width: number; height: number }) => void): void;
       release(vx: number, vy: number): void;
       grab(): void;
-      letGo(reason: 'poked' | 'critical'): void;
+      letGo(reason: LetGoReason): void;
       onPhysics(cb: (p: Physics) => void): void;
       leanContact(side: Wall, left: number, right: number): void;
       walk(side: Wall, speed: number): void;
@@ -52,11 +56,13 @@ let character = findCharacter(new URLSearchParams(location.search).get('characte
 const DRAG_THRESHOLD_PX = 4;
 const MULTI_CLICK_MS = 320;
 const MAX_YAW_DEG = 35;
+const TINY_HEIGHT_PX = 170;
 // Spin game: ⌥-drag or a sideways two-finger swipe spins him; enough turns make him dizzy.
 const SPIN_DEG_PER_PX = 0.9;
 const SPIN_DEG_PER_WHEEL = 0.6;
 const SPIN_FRICTION = 1.6; // 1/s: how fast a flick loses speed
-const SPIN_MAX_DEG_S = 1440;
+// High, so a faster flick really does spin him harder (it coasts about v / SPIN_FRICTION degrees).
+const SPIN_MAX_DEG_S = 2880;
 const SPIN_SETTLE_DEG_S = 45; // below this he stops coasting and turns back to face you
 const DIZZY_TURNS = 3;
 const DIZZY_DRAIN_TURNS_S = 0.35; // the meter drains while he isn't spinning
@@ -77,7 +83,7 @@ const renderer = await SplatPetRenderer.create(canvas, character.file);
 const pet = new PetController(
   renderer,
   setBubble,
-  () => bridge.letGo('critical'),
+  (reason) => bridge.letGo(reason),
   // Leaning: fit the window so the silhouette's outermost point touches the wall.
   (wall) => fitToWall(wall),
   {
@@ -148,17 +154,47 @@ bridge.ready(); // main replays the current agent state now that we can show it
 // Dev server only (the packaged app loads from file://).
 if (location.protocol.startsWith('http')) (window as unknown as { __petDebug: unknown }).__petDebug = { measureClips: () => renderer.measureClips() };
 
+// ---------- window size ----------
+// Pin the canvas to the size main intends. On Windows a move can nudge the window by a pixel
+// (see place() in main.cjs); a canvas that followed would rebuild its WebGL buffer and blank a frame.
+bridge.onSize(({ width, height }) => {
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  // Below about 25% the speech bubble would be wider than the whole pet: hide it.
+  document.body.classList.toggle('tiny', height < TINY_HEIGHT_PX);
+});
+
 // ---------- click-through toggling ----------
+/** 'body': on him (grab). 'near': the empty space around him (spin). null: clicks go through to the desktop. */
+type Hover = 'body' | 'near' | null;
 let interactive = false;
-function setInteractive(on: boolean): void {
-  if (on === interactive) return;
-  interactive = on;
-  bridge.setInteractive(on);
-  document.body.style.cursor = on ? 'grab' : 'default';
+let hover: Hover = null;
+function setHover(next: Hover): void {
+  if (next === hover) return;
+  hover = next;
+  document.body.style.cursor = next === 'body' ? 'grab' : next === 'near' ? 'ew-resize' : 'default';
+  if (!!next === interactive) return;
+  interactive = !!next;
+  bridge.setInteractive(interactive);
+}
+/** Spinning from beside him needs him standing free: not flying, hanging, or resting. */
+const canSpinFromBeside = () => !pet.isAirborne && !pet.isResting;
+function hoverAt(x: number, y: number): Hover {
+  if (renderer.hitTest(x, y).hit) return 'body';
+  return canSpinFromBeside() && renderer.nearBody(x, y) ? 'near' : null;
+}
+
+// ---------- dragging: main places the window at the cursor, at most once per frame ----------
+let dragPending = false;
+function startDrag(): void {
+  document.body.style.cursor = 'grabbing';
+  bridge.dragBegin();
+  pet.beginDrag();
 }
 
 // ---------- pointer: hover / click / multi-click / drag ----------
-type Press = { screenX: number; screenY: number; part: BodyPart; dragging: boolean; spin: boolean };
+/** `beside`: pressed in the empty space around him, which only ever spins him. */
+type Press = { screenX: number; screenY: number; part: BodyPart; dragging: boolean; spin: boolean; beside?: boolean };
 let press: Press | null = null;
 /** Recent pointer positions while dragging, for the release velocity. */
 let trail: { t: number; x: number; y: number }[] = [];
@@ -174,6 +210,8 @@ function releaseVelocity(now: number): { vx: number; vy: number } {
   return { vx: (b.x - a.x) / dt, vy: (b.y - a.y) / dt };
 }
 let clicks: { count: number; part: BodyPart; timer: number } | null = null;
+/** Recent clicks while he hangs, to tell slow pokes from a flurry. */
+let hangClicks: number[] = [];
 
 /** Last time you touched him (click, drag, spin, menu) or he was busy: the rest clock counts from here. */
 let lastTouched = performance.now();
@@ -193,11 +231,10 @@ window.addEventListener('pointermove', (e) => {
     }
     if (!press.dragging && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
       press.dragging = true;
-      document.body.style.cursor = 'grabbing';
-      pet.beginDrag();
+      startDrag();
     }
     if (press.dragging) {
-      bridge.moveBy(dx, dy);
+      dragPending = true;
       press.screenX = e.screenX;
       press.screenY = e.screenY;
       trail.push({ t: e.timeStamp, x: e.screenX, y: e.screenY });
@@ -205,13 +242,20 @@ window.addEventListener('pointermove', (e) => {
     }
     return;
   }
-  setInteractive(renderer.hitTest(e.clientX, e.clientY).hit);
+  setHover(hoverAt(e.clientX, e.clientY));
 });
 
 window.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
   const hit = renderer.hitTest(e.clientX, e.clientY);
-  if (!hit.hit) return;
+  if (!hit.hit) {
+    // Beside him: a sideways drag spins him, harder the faster you swipe.
+    if (!canSpinFromBeside() || !renderer.nearBody(e.clientX, e.clientY)) return;
+    touch();
+    press = { screenX: e.screenX, screenY: e.screenY, part: 'body', dragging: false, spin: true, beside: true };
+    document.body.setPointerCapture(e.pointerId);
+    return;
+  }
   touch();
   // No spinning him while he sits or walks: the click wakes him instead.
   press = { screenX: e.screenX, screenY: e.screenY, part: hit.part, dragging: false, spin: e.altKey && !pet.isResting };
@@ -223,7 +267,7 @@ window.addEventListener('pointerdown', (e) => {
     // Caught in mid-air: he's straight away being dragged. (Hanging waits: a click lets go.)
     if (!pet.isHanging) {
       press.dragging = true;
-      pet.beginDrag();
+      startDrag();
     }
   }
 });
@@ -232,6 +276,7 @@ window.addEventListener('pointerup', (e) => {
   if (!press || e.button !== 0) return;
   const p = press;
   press = null;
+  if (p.beside) return; // a spin from beside him (or a click on empty space): no reaction
   if (p.dragging) {
     document.body.style.cursor = 'grab';
     if (!p.spin) {
@@ -241,9 +286,14 @@ window.addEventListener('pointerup', (e) => {
     }
     return; // a spin keeps coasting on its own
   }
-  // Poking him while he hangs makes him let go.
+  // Poking him while he hangs: slow pokes he fights off (and tires), a quick flurry knocks him off.
   if (pet.isHanging) {
-    bridge.letGo('poked');
+    const now = performance.now();
+    hangClicks = [...hangClicks.filter((t) => now - t < HANG.fastWindowMs), now];
+    if (hangClicks.length >= HANG.fastClicks) {
+      hangClicks = [];
+      pet.letGo('poked');
+    } else pet.hangPoke();
     return;
   }
   // Resolve single / double / triple click after a short window.
@@ -368,8 +418,14 @@ bridge.onCursor(({ x, w }) => {
 });
 
 // ---------- physics (main flies the window; we play along) ----------
-/** How far to lift him while hanging: the hang clip's fists reach 0.169 of the window height (/debug/extents). */
+/**
+ * While hanging, his top hand is held at GRIP_AT of the window height (the menu bar edge),
+ * whichever clip is playing: the body swings and drops below it the way a hanging body does.
+ * Without hand bones, fall back to the lift measured for the two-handed clip (/debug/extents).
+ */
+const GRIP_AT = 0.014;
 const HANG_LIFT = 0.155;
+const MAX_LIFT = 0.4;
 let lift = 0;
 let appliedLift = 0;
 bridge.onPhysics((p) => {
@@ -397,6 +453,8 @@ let lastFrame = performance.now();
 function frame(now: number): void {
   const dt = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
+  if (dragPending && press?.dragging && !press.spin) bridge.dragMove();
+  dragPending = false;
   if (!pet.isFree) lastTouched = now;
   pet.restTick(now - lastTouched);
   restYaw += (restYawTarget() - restYaw) * Math.min(1, dt * 5);
@@ -405,8 +463,15 @@ function frame(now: number): void {
   const dizzy = sway.pitch !== 0 || sway.roll !== 0;
   const lookAllowed =
     !press?.dragging && !pet.isAirborne && !pet.isLeaning && !pet.isResting && !isSpinning() && !dizzy && pet.agentState !== 'sleep';
-  // Reach up to the menu bar while hanging; ease back down once he lets go.
-  lift += ((pet.isHanging ? HANG_LIFT : 0) - lift) * Math.min(1, dt * 12);
+  // Reach up to the menu bar while hanging (hands pinned to it); ease back down once he lets go.
+  pet.hangTick(now);
+  let liftTarget = 0;
+  if (pet.isHanging) {
+    const hand = renderer.topHandY();
+    const h = canvas.clientHeight;
+    liftTarget = hand === null || !h ? HANG_LIFT : Math.min(MAX_LIFT, Math.max(0, lift + (hand - GRIP_AT * h) / h));
+  }
+  lift += (liftTarget - lift) * Math.min(1, dt * 12);
   if (!pet.isHanging && lift < 0.001) lift = 0;
   if (lift !== appliedLift) {
     renderer.setLift(lift);

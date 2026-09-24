@@ -43,6 +43,13 @@ export const REST_LINES = {
 export const LEAN_LINES = ['这面墙归我了', '酷吧？', '（靠墙）', '别打扰我耍帅', '今天也很帅呢'];
 /** Hanging from the top of the screen. */
 export const HANG_LINES = ['抓住了！', '好高…别往下看…', '我…我坚持得住！'];
+/** One hand slips: he's hanging by the other now. */
+export const HANG_TIRED_LINES = ['手…手酸了…', '快撑不住了！', '一只手也能挂！…吧'];
+/** Poked while hanging, by how many hands he still has on the edge. */
+export const HANG_POKE_LINES = {
+  two: ['别戳我！', '走开走开！', '我要掉下去啦！'],
+  one: ['啊啊啊别碰！', '要滑下去了！', '救命——'],
+};
 
 export function pick(lines: string[] | undefined): string {
   if (!lines?.length) return '';

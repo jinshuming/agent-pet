@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>自定义大小</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f6f6f8;
+        --fg: #1d1d22;
+        --muted: #6b6b76;
+        --accent: #7a5cff;
+        --field: #fff;
+        --border: #d6d6de;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1f1f24;
+          --fg: #ececf1;
+          --muted: #9a9aa6;
+          --field: #2a2a31;
+          --border: #3a3a44;
+        }
+      }
+      body {
+        margin: 0;
+        padding: 18px 20px;
+        background: var(--bg);
+        color: var(--fg);
+        font: 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        user-select: none;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      input[type='range'] {
+        flex: 1;
+        accent-color: var(--accent);
+      }
+      .pct {
+        display: flex;
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--field);
+        padding: 2px 6px;
+      }
+      input[type='number'] {
+        width: 44px;
+        border: 0;
+        background: transparent;
+        color: var(--fg);
+        font: inherit;
+        text-align: right;
+        outline: none;
+      }
+      .hint {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 12px;
+      }
+      button {
+        border: 0;
+        border-radius: 6px;
+        padding: 5px 16px;
+        background: var(--accent);
+        color: #fff;
+        font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="row">
+      <input id="slider" type="range" step="1" aria-label="大小" />
+      <label class="pct"><input id="value" type="number" step="1" aria-label="大小百分比" />%</label>
+    </div>
+    <div class="hint" id="hint"></div>
+    <div class="actions"><button id="done">完成</button></div>
+    <script>
+      const q = new URLSearchParams(location.search);
+      const min = Number(q.get('min')) || 10;
+      const max = Number(q.get('max')) || 250;
+      const slider = document.getElementById('slider');
+      const value = document.getElementById('value');
+      slider.min = value.min = min;
+      slider.max = value.max = max;
+      document.getElementById('hint').textContent = `${min}%–${max}%（最大值由屏幕高度决定），拖动时实时生效`;
+
+      const show = (pct) => {
+        slider.value = pct;
+        if (document.activeElement !== value) value.value = pct;
+      };
+      show(Number(q.get('current')) || 100);
+
+      const apply = (pct) => {
+        const n = Math.round(Number(pct));
+        if (!Number.isFinite(n)) return;
+        window.sizeDialog.set(Math.min(max, Math.max(min, n)));
+      };
+      slider.addEventListener('input', () => {
+        value.value = slider.value;
+        apply(slider.value);
+      });
+      // Typing "1" on the way to "150" shouldn't flash the pet down to 10%: apply on commit.
+      value.addEventListener('change', () => apply(value.value));
+      value.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          apply(value.value);
+          window.sizeDialog.close();
+        }
+      });
+      window.sizeDialog.onCurrent((pct) => show(pct));
+      document.getElementById('done').addEventListener('click', () => {
+        apply(value.value);
+        window.sizeDialog.close();
+      });
+      document.addEventListener('keydown', (e) => e.key === 'Escape' && window.sizeDialog.close());
+    </script>
+  </body>
+</html>

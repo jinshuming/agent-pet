@@ -3,6 +3,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('petBridge', {
   setInteractive: (interactive) => ipcRenderer.send('pet:set-interactive', !!interactive),
   moveBy: (dx, dy) => ipcRenderer.send('pet:move-by', { dx, dy }),
+  dragBegin: () => ipcRenderer.send('pet:drag-begin'),
+  dragMove: () => ipcRenderer.send('pet:drag-move'),
+  onSize: (cb) => ipcRenderer.on('pet:size', (_e, s) => cb(s)),
   release: (vx, vy) => ipcRenderer.send('pet:release', { vx, vy }),
   grab: () => ipcRenderer.send('pet:grab'),
   letGo: (reason) => ipcRenderer.send('pet:let-go', reason),

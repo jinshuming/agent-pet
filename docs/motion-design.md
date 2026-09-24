@@ -117,3 +117,24 @@ The walk is the library Walking clip with its travel removed by `scripts/make-in
 | `stand-up.glb` | floor → stand | Floor Sit Up (3) | Best hand-over from sitting. 46 cm of forward travel removed with make-in-place |
 
 `scripts/face-forward.mjs` measures a clip's heading from the pelvis twist and can turn it by any angle; these clips turned out to need nothing beyond `fix-clip-facing`.
+
+## Hanging stamina (generated 2026-09-24, 14 credits)
+
+He hangs like a person tiring out (`HANG` in `clips.ts`, state machine in `Controller.hangTick`): both hands for 15 s, then one hand slips (`hangLoseGrip`) and he dangles from the other (`hangOneArm`) for 6–9 s, then drops. A slow poke makes him fight it off (`hangStruggle` with two hands, `hangSlip` with one) and costs 2.5 s of grip; 4 clicks within 1.2 s knock him straight off. The renderer pins his higher hand to the top edge every frame, so any hanging clip lines up. If a file is missing, `CLIP_FALLBACK` plays the two-handed `hang.glb` in its place.
+
+| Clip file | Use | Sample | Why |
+|---|---|---|---|
+| `hang-lose-grip.glb` | both hands → one | Hanging Slip Panic (4) | All four One-Hand Hang Slip samples kept both hands on the ledge (start and end 3° apart). The slip clip is exactly the moment a hand lets go: jolt, flail, settle on one hand. Liveliest of the one-armed slips |
+| `hang-one-arm.glb` | one-armed loop | Hanging Pendulum (4) | 6° seam, least drift |
+| `hang-struggle.glb` | poked, two hands | Annoyed Hang Ledge (1) | 3° seam, both hands stay up, strongest kicks |
+| `hang-one-arm-slip.glb` | poked, one hand | Hanging Slip Panic (3) | Closest to the one-armed loop (14° either way) |
+
+The prompts:
+
+**hang-lose-grip.glb (one-shot, 3s)**: A person hanging from a high ledge above them with both hands gripping overhead, arms fully extended, feet dangling in the air. Their arms start to tremble with fatigue and they grimace, then the left hand slips off the ledge, the body drops slightly and swings and twists, the free left arm flails once and then dangles at the side, ending hanging by the right hand only with the right arm fully extended overhead. Facing forward, no climbing, feet never touch the ground. Start hanging by both hands, end hanging by the right hand only.
+
+**hang-one-arm.glb (loop, 6s)**: An exhausted person hanging from a high ledge above them by the right hand only, right arm fully extended overhead, feet dangling in the air. The body swings slowly side to side like a pendulum, the free left arm dangles and every few seconds reaches up straining to regrab the ledge but falls back short, the legs kick weakly and dangle, the head tilts with effort and strain. Facing forward, no climbing, feet never touch the ground. Start and end in the same pose hanging by the right hand so it loops seamlessly.
+
+**hang-struggle.glb (one-shot, 3s)**: A person hanging from a high ledge above them with both hands gripping overhead, arms fully extended, feet dangling in the air, gets poked and resists. Annoyed, they kick both legs wildly and swing the whole body side to side, twisting the hips to shake off whoever is poking them, while both hands keep gripping the ledge, then they settle back to hanging still. Facing forward, no climbing, feet never touch the ground. Start and end hanging still with both hands overhead.
+
+**hang-one-arm-slip.glb (one-shot, 2s)**: A tired person hanging from a high ledge above them by the right hand only, right arm fully extended overhead, feet dangling, gets poked. Their grip slips a little and the body jolts down and swings wildly, the free left arm flails and grabs at the air in panic, the legs kick frantically, then they settle back to hanging by the right hand, panting. Facing forward, no climbing, feet never touch the ground. Start and end hanging by the right hand only.

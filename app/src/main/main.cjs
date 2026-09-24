@@ -37,9 +37,9 @@ const sessions = new AgentSessions((view) => {
 // ---------- Size ----------
 // The camera frames the character relative to the canvas, so scaling the window
 // scales the pet. The window grows around the character's feet, so he stays standing in place.
-const SCALE_MIN = 0.4;
+const SCALE_MIN = 0.1;
 const SCALE_MAX = 2.5;
-const SCALE_PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+const SCALE_PRESETS = [0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
 const settingsPath = () => path.join(require('node:os').homedir(), '.agent-pet', 'settings.json');
 
 function loadSettings() {
@@ -63,6 +63,23 @@ function saveSettings(patch) {
 const clampScale = (s) => Math.min(SCALE_MAX, Math.max(SCALE_MIN, Number(s) || 1));
 let scale = clampScale(loadSettings().scale ?? 1);
 let saveTimer = null;
+
+/** The window's size at the current scale. */
+const winSize = () => ({ width: Math.round(WIN_W * scale), height: Math.round(WIN_H * scale) });
+
+/**
+ * Every move goes through here, with the size pinned. On Windows at a display scale
+ * other than 100%, setPosition grows or shrinks the window by 1–3 px (electron#9477,
+ * #27651); splat-engine then resizes the WebGL drawing buffer, which clears it, and a
+ * transparent window shows that empty frame: the pet flickers while dragged or flying.
+ */
+function place(x, y) {
+  if (!win) return;
+  win.setBounds({ x: Math.round(x) || 0, y: Math.round(y) || 0, ...winSize() });
+}
+
+/** The renderer pins its canvas to this size, so a stray pixel of window resize can't rebuild the buffer. */
+const sendSize = () => win?.webContents.send('pet:size', winSize());
 
 /** Where the feet stand, as a fraction of the window height from the top (renderer: 1 - FEET_MARGIN). */
 const FEET_AT = 0.85;
@@ -91,10 +108,41 @@ function setScale(next) {
   win.setResizable(true);
   win.setBounds({ x: Math.round(b.x + b.width / 2 - width / 2) || 0, y, width, height });
   win.setResizable(false);
+  sendSize();
+  sizeDialog?.webContents.send('size:current', Math.round(scale * 100));
   // Pinch gestures fire many steps; write the file once they settle.
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => saveSettings({ scale }), 500);
 }
+
+// Right-click → 大小 → 自定义…: a small window with a slider and a percentage box. It resizes the pet live.
+let sizeDialog = null;
+function openSizeDialog() {
+  if (sizeDialog) return sizeDialog.focus();
+  const max = Math.floor(maxScaleFor(win.getBounds()) * 100);
+  sizeDialog = new BrowserWindow({
+    width: 340,
+    height: 140,
+    useContentSize: true, // the title bar comes on top, so the button always fits
+    title: '自定义大小',
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    webPreferences: { preload: path.join(__dirname, 'size-dialog-preload.cjs'), contextIsolation: true, nodeIntegration: false },
+  });
+  sizeDialog.setMenu(null);
+  sizeDialog.loadFile(path.join(__dirname, 'size-dialog.html'), {
+    query: { current: String(Math.round(scale * 100)), min: String(Math.round(SCALE_MIN * 100)), max: String(max) },
+  });
+  sizeDialog.on('closed', () => (sizeDialog = null));
+}
+ipcMain.on('size:set', (_e, pct) => {
+  const n = Number(pct);
+  if (Number.isFinite(n)) setScale(n / 100);
+});
+ipcMain.on('size:close', () => sizeDialog?.close());
 
 // ---------- Character ----------
 // The list lives in the renderer (pet/characters.ts); main only remembers the choice.
@@ -135,7 +183,7 @@ function createWindow() {
   });
   // The constructor clamps x/y to the work area; moving afterwards lets the
   // transparent bottom margin hang over the Dock.
-  win.setPosition(workArea.x + workArea.width - w - 40, workArea.y + workArea.height - h + feetGapPx(h));
+  place(workArea.x + workArea.width - w - 40, workArea.y + workArea.height - h + feetGapPx(h));
   win.setAlwaysOnTop(true, 'floating');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   // Start fully click-through; `forward` keeps mousemove flowing so the renderer can hit-test.
@@ -172,7 +220,10 @@ function createWindow() {
   });
 }
 
-ipcMain.on('pet:ready', () => pushView(currentView));
+ipcMain.on('pet:ready', () => {
+  sendSize();
+  pushView(currentView);
+});
 
 ipcMain.on('pet:set-interactive', (_e, interactive) => {
   if (!win) return;
@@ -185,9 +236,24 @@ ipcMain.on('pet:scale-by', (_e, factor) => setScale(scale * Number(factor)));
 ipcMain.on('pet:move-by', (_e, { dx, dy }) => {
   if (!win) return;
   const [x, y] = win.getPosition();
-  // setPosition throws on anything but a plain int: `|| 0` turns NaN and -0
-  // (Math.round(-0.3), e.g. when dragged against the screen's left/top edge) into 0.
-  win.setPosition(Math.round(x + dx) || 0, Math.round(y + dy) || 0);
+  // place() rounds, and `|| 0` turns NaN and -0 (Math.round(-0.3)) into 0: setBounds throws on either.
+  place(x + dx, y + dy);
+});
+
+// Dragging: main puts the window at the cursor minus where it was grabbed. Absolute, so
+// rounding can't accumulate the way summing pointer deltas does; the renderer asks at
+// most once per frame, however fast the mouse reports (1000 Hz mice are common on Windows).
+let dragOffset = null;
+ipcMain.on('pet:drag-begin', () => {
+  if (!win) return;
+  const c = screen.getCursorScreenPoint();
+  const [x, y] = win.getPosition();
+  dragOffset = { x: c.x - x, y: c.y - y };
+});
+ipcMain.on('pet:drag-move', () => {
+  if (!win || !dragOffset) return;
+  const c = screen.getCursorScreenPoint();
+  place(c.x - dragOffset.x, c.y - dragOffset.y);
 });
 
 // ---------- Physics: fling, fall, hang from the top edge, lean on the side walls ----------
@@ -201,7 +267,8 @@ const HARD_LANDING_SPEED = 2200; // px/s downward at touchdown: he lands dizzy
 const BODY_HALF_W = 0.13; // half the standing silhouette's width, as a fraction of the window width
 // macOS keeps a window's top at or below the menu bar, so a drag against the top edge ends here.
 const TOP_GRAB_PX = 12;
-const HANG_MS = { min: 7000, max: 13000 };
+// The renderer tires him out and lets go (see HANG in clips.ts); this only catches a renderer that never does.
+const HANG_SAFETY_MS = 60_000;
 // Set down this close (body edge to screen edge) to a side of the screen: he leans on it.
 const WALL_SNAP_PX = 80;
 const PHYSICS_TICK_MS = 16;
@@ -221,9 +288,9 @@ function stopPhysics() {
 function startHang() {
   stopPhysics();
   const b = win.getBounds();
-  win.setPosition(b.x, screen.getDisplayMatching(b).workArea.y);
+  place(b.x, screen.getDisplayMatching(b).workArea.y);
   sendPhysics('hang');
-  hangTimer = setTimeout(() => letGo('tired'), HANG_MS.min + Math.random() * (HANG_MS.max - HANG_MS.min));
+  hangTimer = setTimeout(() => letGo('tired'), HANG_SAFETY_MS);
 }
 
 /** reason: 'tired' (hung too long), 'poked' (clicked while hanging), 'critical' (the agent needs you). */
@@ -255,7 +322,7 @@ function fly(vx, vy, reason = 'fling') {
       s.x = Math.min(right, Math.max(left, s.x));
       s.vx = -s.vx * WALL_BOUNCE;
     }
-    const put = () => win.setPosition(Math.round(s.x) || 0, Math.round(s.y) || 0);
+    const put = () => place(Math.round(s.x) || 0, Math.round(s.y) || 0);
     // Thrown up into the menu bar: he catches the edge.
     if (s.y <= wa.y && s.vy < 0) {
       s.y = wa.y;
@@ -299,9 +366,9 @@ function walk(side, speed) {
     const step = speed * dt;
     if (Math.abs(target - s.x) > step) {
       s.x += Math.sign(target - s.x) * step;
-      return win.setPosition(Math.round(s.x) || 0, b.y);
+      return place(Math.round(s.x) || 0, b.y);
     }
-    win.setPosition(Math.round(target) || 0, b.y);
+    place(Math.round(target) || 0, b.y);
     stopPhysics();
     const floor = wa.y + wa.height - 8 - b.height * FEET_AT;
     if (b.y < floor - 2) return fly(0, 0, 'hop');
@@ -332,7 +399,7 @@ function release(v) {
   if (wall) {
     const x = wall === 'left' ? wa.x + half - b.width / 2 : wa.x + wa.width - half - b.width / 2;
     const floor = wa.y + wa.height - 8 - b.height * FEET_AT;
-    win.setPosition(Math.round(x) || 0, b.y);
+    place(Math.round(x) || 0, b.y);
     if (b.y < floor - 2) return fly(0, 0);
     return sendPhysics('land', { hard: false, wall });
   }
@@ -348,12 +415,15 @@ ipcMain.on('pet:lean-contact', (_e, m) => {
   const edge = m?.side === 'left' ? b.x + Number(m.left) : b.x + Number(m.right);
   const target = m?.side === 'left' ? wa.x : wa.x + wa.width;
   const dx = target - edge;
-  if (Number.isFinite(dx) && Math.abs(dx) < b.width / 2) win.setPosition(Math.round(b.x + dx) || 0, b.y);
+  if (Number.isFinite(dx) && Math.abs(dx) < b.width / 2) place(Math.round(b.x + dx) || 0, b.y);
 });
 
-ipcMain.on('pet:release', (_e, v) => release(v));
+ipcMain.on('pet:release', (_e, v) => {
+  dragOffset = null;
+  release(v);
+});
 ipcMain.on('pet:grab', () => stopPhysics());
-ipcMain.on('pet:let-go', (_e, reason) => letGo(reason === 'critical' ? 'critical' : 'poked'));
+ipcMain.on('pet:let-go', (_e, reason) => letGo(['tired', 'critical'].includes(reason) ? reason : 'poked'));
 
 // Right-click menu: trigger any agent state by hand, to preview it without Claude Code.
 const AGENT_STATES = [
@@ -417,6 +487,7 @@ ipcMain.on('pet:show-menu', (_e, catalog = {}) => {
           click: () => setScale(p),
         })),
         { label: '最大（适配屏幕）', click: () => setScale(SCALE_MAX) },
+        { label: '自定义…', click: () => openSizeDialog() },
         { type: 'separator' },
         { label: '提示：在角色上双指捏合，或按住 ⌘ 滚动滚轮微调', enabled: false },
       ],
@@ -433,7 +504,7 @@ ipcMain.on('pet:show-menu', (_e, catalog = {}) => {
 //   POST /event   Claude Code hook payload, sent by plugin/scripts/emit.mjs
 //   POST /state   {"state":"working"}  manual override for testing
 //   POST /preview {"kind":"clip"|"reaction","id":"typing"}  same as the right-click previews
-//   POST /scale   {"scale":1.5}  resize the pet (0.4–2.5), same as the 大小 menu
+//   POST /scale   {"scale":1.5}  resize the pet (0.1–2.5), same as the 大小 menu
 //   POST /character {"id":"man-in-suit"}  switch character, same as the 切换角色 menu
 //   GET  /health
 //   GET  /debug/sessions
@@ -516,7 +587,7 @@ function startControlServer() {
         return reply(400, { error: err.message });
       }
       stopPhysics();
-      if (Number.isFinite(v.x) && Number.isFinite(v.y)) win.setPosition(Math.round(v.x), Math.round(v.y));
+      if (Number.isFinite(v.x) && Number.isFinite(v.y)) place(Math.round(v.x), Math.round(v.y));
       release(v);
       return reply(200, { ok: true, from: win.getBounds() });
     }
@@ -568,6 +639,28 @@ function startControlServer() {
       return reply(200, { ok: true, path: out, size: image.getSize() });
     }
 
+    // [{"type":"mouseDown","x":100,"y":300,"wait":16}, …]: replay mouse events into the pet window
+    // (window coordinates) without touching the real cursor. For testing clicks and spins.
+    if (process.env.PET_DEV_URL && req.method === 'POST' && url.pathname === '/debug/input') {
+      let events;
+      try {
+        events = await readJson(req);
+      } catch (err) {
+        return reply(400, { error: err.message });
+      }
+      if (!Array.isArray(events)) return reply(400, { error: 'expected an array of events' });
+      for (const ev of events.slice(0, 500)) {
+        const type = ['mouseDown', 'mouseUp', 'mouseMove'].includes(ev?.type) ? ev.type : null;
+        if (!type) continue;
+        const [wx, wy] = win.getPosition();
+        const x = Math.round(ev.x) || 0;
+        const y = Math.round(ev.y) || 0;
+        win.webContents.sendInputEvent({ type, x, y, globalX: wx + x, globalY: wy + y, button: 'left', clickCount: 1 });
+        await new Promise((r) => setTimeout(r, Math.min(1000, Math.max(0, Number(ev.wait) || 0))));
+      }
+      return reply(200, { ok: true });
+    }
+
     // {"x":400,"y":200}: put the window there (to test walking, leaning, hanging from anywhere).
     if (process.env.PET_DEV_URL && req.method === 'POST' && url.pathname === '/debug/move') {
       let body;
@@ -577,7 +670,7 @@ function startControlServer() {
         return reply(400, { error: err.message });
       }
       stopPhysics();
-      win.setPosition(Math.round(Number(body?.x)) || 0, Math.round(Number(body?.y)) || 0);
+      place(Math.round(Number(body?.x)) || 0, Math.round(Number(body?.y)) || 0);
       return reply(200, { ok: true, bounds: win.getBounds() });
     }
 

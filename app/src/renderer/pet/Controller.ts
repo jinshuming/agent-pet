@@ -5,6 +5,7 @@ import {
   AGENT_SEQUENCES,
   BUSY,
   DRAG_SEQUENCE,
+  HANG,
   HANG_SEQUENCE,
   IDLE_FIDGETS,
   IDLE_FIDGET_MS,
@@ -16,7 +17,17 @@ import {
   type Step,
   type Wall,
 } from './clips';
-import { FLY_LINES, HANG_LINES, LEAN_LINES, REACTION_LINES, REST_LINES, STATE_LINES, pick } from './lines';
+import {
+  FLY_LINES,
+  HANG_LINES,
+  HANG_POKE_LINES,
+  HANG_TIRED_LINES,
+  LEAN_LINES,
+  REACTION_LINES,
+  REST_LINES,
+  STATE_LINES,
+  pick,
+} from './lines';
 
 const CRITICAL: ReadonlySet<AgentState> = new Set(['permission', 'error']);
 /** Agent states that leave him free to rest. */
@@ -24,6 +35,12 @@ const RESTFUL: ReadonlySet<AgentState> = new Set(['idle', 'sleep']);
 
 /** Left alone: walking to a wall, sat against it, nodding off, asleep, or getting back up. */
 export type Rest = 'walking' | 'sitting' | 'dozing' | 'asleep' | 'standing';
+
+/** Why he lets go of the top edge: arms gave out, knocked off, or the agent needs you. */
+export type LetGoReason = 'tired' | 'poked' | 'critical';
+
+/** Hands on the edge: two, one slipping off, one, or already letting go. */
+type Grip = 'two' | 'slipping' | 'one' | 'falling';
 
 export type RestHooks = {
   /** Start walking to the nearest side of the screen; returns which side. */
@@ -53,12 +70,20 @@ export class PetController {
   private rest: Rest | null = null;
   /** The side he's walking to or sitting against. */
   private restSide: Wall | null = null;
+  // Hanging from the top edge (see HANG).
+  private grip: Grip = 'two';
+  private hangSince = 0;
+  /** Grip spent struggling against pokes, on top of the time he's hung. */
+  private hangSpentMs = 0;
+  private oneArmMs = 0;
+  /** A one-shot (slipping, struggling) is playing over the hang loop. */
+  private hangAction = false;
 
   constructor(
     private readonly renderer: SplatPetRenderer,
     private readonly onLabel: (text: string) => void,
     /** Ask main to drop him from the top edge (the agent needs attention). */
-    private readonly onLetGo: () => void = () => {},
+    private readonly onLetGo: (reason: LetGoReason) => void = () => {},
     /** He has leaned in and is holding the pose (the window can now be fitted to the wall). */
     private readonly onLeaning: (wall: Wall) => void = () => {},
     private readonly restHooks: RestHooks = { walk: () => 'right', stop: () => {}, sat: () => {} },
@@ -190,7 +215,7 @@ export class PetController {
       return;
     }
     // Hanging around while the agent needs you would hide the plea: let go and come down.
-    if (this.airborne === 'hanging' && CRITICAL.has(state)) this.onLetGo();
+    if (this.airborne === 'hanging' && CRITICAL.has(state)) this.letGo('critical');
     if (!this.held) this.applyAgent();
   }
 
@@ -262,8 +287,59 @@ export class PetController {
     this.airborne = 'hanging';
     this.wall = null;
     this.reaction = null;
+    this.grip = 'two';
+    this.hangSince = performance.now();
+    this.hangSpentMs = 0;
+    this.oneArmMs = HANG.oneArmMs.min + Math.random() * (HANG.oneArmMs.max - HANG.oneArmMs.min);
+    this.hangAction = false;
     this.onLabel(pick(HANG_LINES));
     this.renderer.play(HANG_SEQUENCE);
+  }
+
+  /** Called every frame: his grip wears out. Both hands, then one, then he drops. */
+  hangTick(now: number): void {
+    if (this.airborne !== 'hanging' || this.hangAction) return;
+    const t = now - this.hangSince + this.hangSpentMs;
+    if (this.grip === 'two' && t >= HANG.twoHandMs) this.slipOneHand();
+    else if (this.grip === 'one' && t >= HANG.twoHandMs + this.oneArmMs) this.letGo('tired');
+  }
+
+  /** A slow poke while he hangs: he kicks and twists to shake it off, which tires him faster. */
+  hangPoke(): void {
+    if (this.airborne !== 'hanging' || this.grip === 'falling') return;
+    this.hangSpentMs += HANG.pokeCostMs;
+    this.onLabel(pick(HANG_POKE_LINES[this.grip === 'two' ? 'two' : 'one']));
+    if (this.hangAction) return; // already struggling (or slipping): the line is enough
+    this.hangAction = true;
+    const clip = this.grip === 'two' ? 'hangStruggle' : 'hangSlip';
+    this.renderer.play([{ clip, loop: false }], () => {
+      if (this.airborne !== 'hanging') return;
+      this.hangAction = false;
+      this.resumeHang();
+    });
+  }
+
+  /** Let go of the top edge (main flies him down and reports the landing). */
+  letGo(reason: LetGoReason): void {
+    if (this.airborne !== 'hanging' || this.grip === 'falling') return;
+    this.grip = 'falling';
+    this.onLetGo(reason);
+  }
+
+  private slipOneHand(): void {
+    this.grip = 'slipping';
+    this.hangAction = true;
+    this.onLabel(pick(HANG_TIRED_LINES));
+    this.renderer.play([{ clip: 'hangLoseGrip', loop: false }], () => {
+      if (this.airborne !== 'hanging') return;
+      this.grip = 'one';
+      this.hangAction = false;
+      this.resumeHang();
+    });
+  }
+
+  private resumeHang(): void {
+    this.renderer.play(this.grip === 'two' ? HANG_SEQUENCE : [{ clip: 'hangOneArm', loop: true }]);
   }
 
   /** Back on the ground, maybe against a side of the screen. A hard landing leaves him dizzy. */
@@ -289,7 +365,11 @@ export class PetController {
   /** Replay the current agent state from the start (e.g. after the character changed). */
   refresh(): void {
     this.reaction = null;
-    if (!this.held) this.applyAgent();
+    if (this.airborne === 'hanging') {
+      this.hangAction = false;
+      if (this.grip === 'slipping') this.grip = 'one';
+      this.resumeHang(); // a character swap mid-hang must not leave him standing in the air
+    } else if (!this.held) this.applyAgent();
   }
 
   /** While idle (and nothing else is playing), queue the next little idle action. */

@@ -2,7 +2,7 @@
 // Everything above it deals in Steps (clip + loop) and screen coordinates.
 import { Animation, Character, Scene } from '@viggle/splat-engine';
 import { Vec3 } from 'playcanvas';
-import { CLIP_FILES, type ClipName, type Step } from '../pet/clips';
+import { CLIP_FALLBACK, CLIP_FILES, type ClipName, type Step } from '../pet/clips';
 
 const CROSSFADE_S = 0.25;
 const FOV_DEG = 30;
@@ -25,6 +25,9 @@ export class SplatPetRenderer {
   private onSeqDone: (() => void) | null = null;
   private headBone = -1;
   private neckBone = -1;
+  /** Head, pelvis, hands and feet: their projected box is the "near the body" zone for spinning. */
+  private extentBones: number[] = [];
+  private handBones: number[] = [];
   private readonly tmp = new Vec3();
   private readonly pixel = new Uint8Array(4);
   /** Camera height chosen by autoFrame; setLift offsets from it. */
@@ -44,7 +47,11 @@ export class SplatPetRenderer {
     const names = this.character.armature.boneNames;
     this.headBone = names.findIndex((n) => n.toLowerCase() === 'head');
     this.neckBone = names.findIndex((n) => /^neck_?0?1$/i.test(n));
-    console.log(`[pet] ${names.length} bones, head=${this.headBone}, neck=${this.neckBone}`);
+    this.extentBones = names
+      .map((n, i) => (/^(head|pelvis|hand_[lr]|foot_[lr])$/i.test(n) ? i : -1))
+      .filter((i) => i >= 0);
+    this.handBones = names.map((n, i) => (/^hand_[lr]$/i.test(n) ? i : -1)).filter((i) => i >= 0);
+    console.log(`[pet] ${names.length} bones, head=${this.headBone}, neck=${this.neckBone}, extent=${this.extentBones.length}`);
   }
 
   /**
@@ -114,7 +121,12 @@ export class SplatPetRenderer {
    * pose they start in (typing: ~15° apart), and a hard loop would visibly snap.
    */
   private startStep(step: Step, quiet = false): void {
-    const clip: ClipName = this.loadedClips.has(step.clip) ? step.clip : 'idle';
+    const fallback = CLIP_FALLBACK[step.clip];
+    const clip: ClipName = this.loadedClips.has(step.clip)
+      ? step.clip
+      : fallback && this.loadedClips.has(fallback)
+        ? fallback
+        : 'idle';
     const ok = this.character.crossfadeTo(clip, { duration: CROSSFADE_S, loop: false });
     if (!ok) console.warn(`[pet] clip not found: ${clip}`);
     const a = this.character.armature;
@@ -191,6 +203,33 @@ export class SplatPetRenderer {
       return { hit: true, part: clientY <= neckY ? 'head' : 'body' };
     }
     return { hit: true, part: 'body' };
+  }
+
+  /**
+   * Beside him but not on him: inside the box around his head, hands and feet, grown by
+   * `margin` (a fraction of his on-screen height). Pressing there spins him instead of
+   * clicking through to the desktop.
+   */
+  nearBody(clientX: number, clientY: number, margin = 0.22): boolean {
+    const pts = this.extentBones.map((b) => this.boneScreen(b)).filter((p): p is { x: number; y: number } => !!p);
+    if (pts.length < 2) return false;
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const top = this.headTopScreen()?.y ?? Math.min(...ys);
+    const bottom = Math.max(...ys);
+    const pad = (bottom - top) * margin;
+    return (
+      clientX >= Math.min(...xs) - pad &&
+      clientX <= Math.max(...xs) + pad &&
+      clientY >= top - pad * 0.5 &&
+      clientY <= bottom + pad * 0.3
+    );
+  }
+
+  /** Screen y (CSS px) of his higher hand: the one holding on while he hangs. Null without hand bones. */
+  topHandY(): number | null {
+    const ys = this.handBones.map((b) => this.boneScreen(b)?.y).filter((y): y is number => y !== undefined);
+    return ys.length ? Math.min(...ys) : null;
   }
 
   /** CSS px per metre at the character: how fast to move the window for a walk. */

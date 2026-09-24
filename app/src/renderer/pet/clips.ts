@@ -41,6 +41,11 @@ export const CLIP_FILES = {
   leanLeft: 'motions/lean-left.glb',
   // * generated (picked up / in the air)
   flail: 'motions/drag-flail.glb',
+  // * generated (hanging from the top of the screen, getting tired)
+  hangLoseGrip: 'motions/hang-lose-grip.glb',
+  hangOneArm: 'motions/hang-one-arm.glb',
+  hangStruggle: 'motions/hang-struggle.glb',
+  hangSlip: 'motions/hang-one-arm-slip.glb',
   // * resting (left alone): walk to a side of the screen, sit against it, nod off.
   // Generated with the wall behind him; the renderer turns him so his back is to the screen edge.
   walk: 'motions/walk-in-place.glb', // library Walking with its travel removed (scripts/make-in-place.mjs)
@@ -87,6 +92,10 @@ export const CLIP_LABELS: Record<ClipName, string> = {
   leanInLeft: '✨ 靠上左边的墙',
   leanLeft: '✨ 靠左墙耍酷',
   flail: '✨ 被拎起来乱蹬',
+  hangLoseGrip: '✨ 手滑·剩一只手',
+  hangOneArm: '✨ 单臂吊着摇晃',
+  hangStruggle: '✨ 挂着被戳·乱蹬反抗',
+  hangSlip: '✨ 单臂被戳·打滑乱抓',
   walk: '原地走',
   sitDown: '✨ 靠墙滑坐下',
   sitIdle: '✨ 靠墙坐着',
@@ -153,6 +162,28 @@ export const REACTION_SEQUENCES: Record<Reaction, Step[]> = {
 export const DRAG_SEQUENCE: Step[] = [{ clip: 'flail', loop: true }];
 /** Only once he has caught the top edge of the screen: arms up, hanging. */
 export const HANG_SEQUENCE: Step[] = [{ clip: 'hang', loop: true }];
+
+/**
+ * Hanging wears him out like a person: both hands for `twoHandMs`, then one hand
+ * slips and he dangles from the other for `oneArmMs`, then he drops. Every slow
+ * poke makes him struggle, which costs `pokeCostMs` of grip; `fastClicks` clicks
+ * within `fastWindowMs` knock him straight off.
+ */
+export const HANG = {
+  twoHandMs: 15_000,
+  oneArmMs: { min: 6_000, max: 9_000 },
+  pokeCostMs: 2_500,
+  fastClicks: 4,
+  fastWindowMs: 1_200,
+};
+
+/** A clip that isn't there yet plays this instead of the standing idle (hanging clips keep him hanging). */
+export const CLIP_FALLBACK: Partial<Record<ClipName, ClipName>> = {
+  hangLoseGrip: 'hang',
+  hangOneArm: 'hang',
+  hangStruggle: 'hang',
+  hangSlip: 'hang',
+};
 
 /**
  * Left alone (no clicks, drags or spins, and the agent idle): after `sit` he walks
