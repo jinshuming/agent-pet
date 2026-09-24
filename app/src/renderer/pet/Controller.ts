@@ -105,6 +105,8 @@ export class PetController {
   private permissionSince = 0;
   private nagTimer: number | undefined;
   private dragging = false;
+  /** You're steering him (game mode, see game.ts): the body is yours, agent motions wait. */
+  private gaming = false;
   /** Thrown through the air, or hanging from the top edge. Agent motions wait until he lands. */
   private airborne: 'flying' | 'hanging' | null = null;
   /** Standing against a side of the screen: idle becomes leaning on it. */
@@ -240,9 +242,31 @@ export class PetController {
     });
   }
 
-  /** Dragged, flying or hanging: the body is busy, so agent motions and reactions wait. */
+  /** Dragged, flying, hanging or in game mode: the body is busy, so agent motions and reactions wait. */
   private get held(): boolean {
-    return this.dragging || this.airborne !== null;
+    return this.dragging || this.airborne !== null || this.gaming;
+  }
+
+  /** Game mode takes the body over; leaving it hands back to the agent state (or to a flight main starts). */
+  setGame(on: boolean): void {
+    if (on === this.gaming) return;
+    this.gaming = on;
+    this.dragging = false;
+    this.airborne = null;
+    this.wall = null;
+    this.reaction = null;
+    if (on) {
+      if (this.rest === 'walking') this.restHooks.stop();
+      this.endRest();
+      this.renderer.setTint(0);
+      this.stopBusy();
+      window.clearTimeout(this.fidgetTimer);
+      window.clearTimeout(this.nagTimer);
+    } else this.applyAgent();
+  }
+
+  get isGaming(): boolean {
+    return this.gaming;
   }
 
   setAgentState(state: AgentState, settle: AgentState = 'idle', label = '', activity: Activity | null = null): void {
@@ -457,6 +481,7 @@ export class PetController {
       activity: this.activity,
       reaction: this.reaction,
       dragging: this.dragging,
+      gaming: this.gaming,
       airborne: this.airborne,
       wall: this.wall,
       rest: this.rest,
@@ -468,6 +493,7 @@ export class PetController {
 
   /** How much he looks at the cursor right now (see Gaze). */
   get gaze(): Gaze {
+    if (this.gaming) return NO_GAZE;
     if (this.dragging || this.airborne === 'flying') return NO_GAZE;
     if (this.airborne === 'hanging') return { head: 0.5, body: 0, wander: false, fast: false };
     if (this.rest) return this.rest === 'sitting' ? { head: 0.8, body: 0, wander: true, fast: false } : NO_GAZE;

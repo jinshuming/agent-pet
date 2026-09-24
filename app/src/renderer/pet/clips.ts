@@ -68,6 +68,11 @@ export const CLIP_FILES = {
   // * generated (waiting on you, more and more insistently)
   urgent: 'motions/permission-urgent.glb',
   knock: 'motions/permission-knock.glb',
+  // Game mode (library clips): Running and the air / landing parts of Jump, all in place.
+  gameRun: 'motions/game-run.glb',
+  gameJump: 'motions/game-jump.glb',
+  gameLand: 'motions/game-land.glb',
+  gameCrouch: 'motions/game-crouch.glb',
 } as const;
 
 export type ClipName = keyof typeof CLIP_FILES;
@@ -127,10 +132,17 @@ export const CLIP_LABELS: Record<ClipName, string> = {
   report: '点头·收到汇报',
   urgent: '✨ 挥手喊你',
   knock: '✨ 敲屏幕',
+  gameRun: '游戏：原地跑',
+  gameJump: '游戏：起跳腾空',
+  gameLand: '游戏：落地',
+  gameCrouch: '游戏：蹲下',
 };
 
-/** One step of a motion sequence. Non-looping steps advance when the clip finishes. */
-export type Step = { clip: ClipName; loop: boolean };
+/**
+ * One step of a motion sequence. Non-looping steps advance when the clip finishes.
+ * `fade`: crossfade into it, in seconds (default 0.25; game mode's jump needs quicker).
+ */
+export type Step = { clip: ClipName; loop: boolean; fade?: number };
 
 export type AgentState = 'greet' | 'idle' | 'thinking' | 'working' | 'permission' | 'done' | 'error' | 'sleep';
 

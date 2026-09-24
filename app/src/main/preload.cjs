@@ -18,5 +18,9 @@ contextBridge.exposeInMainWorld('petBridge', {
   onSetCharacter: (cb) => ipcRenderer.on('pet:set-character', (_e, id) => cb(id)),
   onCursor: (cb) => ipcRenderer.on('pet:cursor', (_e, p) => cb(p)),
   onAgentState: (cb) => ipcRenderer.on('pet:agent-state', (_e, s) => cb(s)),
+  place: (x, y) => ipcRenderer.send('pet:place', { x, y }),
+  onGame: (cb) => ipcRenderer.on('pet:game', (_e, g) => cb(g)),
+  gameEnded: (motion) => ipcRenderer.send('pet:game-ended', motion),
+  gameFocus: () => ipcRenderer.send('pet:game-focus'),
   ready: () => ipcRenderer.send('pet:ready'),
 });

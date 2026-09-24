@@ -17,6 +17,7 @@ import {
 import { REACTION_LINES, SPIN_LINES, pick } from './pet/lines';
 import { CHARACTERS, findCharacter, loadLocalCharacters } from './pet/characters';
 import { TeamStrip, type TeamMember } from './pet/team';
+import { GameMode } from './pet/game';
 import { SplatPetRenderer, type BodyPart } from './render/SplatPetRenderer';
 
 type AgentView = { state: AgentState; settle: AgentState; label: string; activity?: Activity | null; team?: TeamMember[] };
@@ -35,7 +36,7 @@ declare global {
       moveBy(dx: number, dy: number): void;
       dragBegin(): void;
       dragMove(): void;
-      onSize(cb: (s: { width: number; height: number }) => void): void;
+      onSize(cb: (s: { width: number; height: number; x: number; y: number }) => void): void;
       release(vx: number, vy: number): void;
       grab(): void;
       letGo(reason: LetGoReason): void;
@@ -48,6 +49,10 @@ declare global {
       onPreview(cb: (p: Preview) => void): void;
       onCursor(cb: (p: { x: number; y: number; w: number; h: number }) => void): void;
       onAgentState(cb: (v: AgentView) => void): void;
+      place(x: number, y: number): void;
+      onGame(cb: (g: { on: boolean; x?: number; y?: number }) => void): void;
+      gameEnded(motion: { vx: number; vy: number; grounded: boolean }): void;
+      gameFocus(): void;
       ready(): void;
     };
   }
@@ -110,6 +115,8 @@ const pet = new PetController(
   },
 );
 
+const game = new GameMode(renderer, (x, y) => bridge.place(x, y), setBubble);
+
 function fitToWall(wall: Wall): void {
   const x = renderer.silhouetteX();
   if (x) bridge.leanContact(wall, x.left, x.right);
@@ -130,6 +137,7 @@ bridge.onAgentState((v) => {
 });
 // Right-click menu previews: play any reaction or single clip once.
 bridge.onPreview((p) => {
+  if (game.active) return;
   // Right-click → 模拟互动 → 休息: pretend he's been left alone that long.
   if (p.kind === 'rest') {
     lastTouched = performance.now() - (p.id === 'sleep' ? REST_MS.sleep : REST_MS.sit);
@@ -165,6 +173,10 @@ bridge.onSetCharacter((id) => {
         console.warn(`[pet] could not load character ${next.id}: ${err}`);
       }
       pet.refresh();
+      if (game.active) {
+        game.refresh();
+        setBubble('');
+      }
     }
   })().finally(() => (swapping = null));
 });
@@ -174,7 +186,7 @@ bridge.ready(); // main replays the current agent state now that we can show it
     measureClips: () => renderer.measureClips(),
     stats: () => renderer.stats(),
     bones: () => renderer.boneNames(),
-    pet: () => pet.debugState(),
+    pet: () => ({ ...pet.debugState(), game: game.active ? game.debugState() : null }),
     setFps: (fps: number) => {
       fpsOverride = fps || null;
       if (fps) renderer.setTargetFps(fps);
@@ -186,7 +198,8 @@ let fpsOverride: number | null = null;
 // ---------- window size ----------
 // Pin the canvas to the size main intends. On Windows a move can nudge the window by a pixel
 // (see place() in main.cjs); a canvas that followed would rebuild its WebGL buffer and blank a frame.
-bridge.onSize(({ width, height }) => {
+bridge.onSize(({ width, height, x, y }) => {
+  if (game.active) game.resync(x, y); // resized around his feet
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
   // Below about 25% the speech bubble would be wider than the whole pet: hide it.
@@ -207,7 +220,7 @@ function setHover(next: Hover): void {
   bridge.setInteractive(interactive);
 }
 /** Spinning from beside him needs him standing free: not flying, hanging, or resting. */
-const canSpinFromBeside = () => !pet.isAirborne && !pet.isResting;
+const canSpinFromBeside = () => !pet.isAirborne && !pet.isResting && !game.active;
 function hoverAt(x: number, y: number): Hover {
   if (renderer.hitTest(x, y).hit) return 'body';
   return canSpinFromBeside() && renderer.nearBody(x, y) ? 'near' : null;
@@ -278,6 +291,11 @@ let pendingHover: { x: number; y: number } | null = null;
 
 window.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
+  // Game mode: clicking him only gives the keyboard back to the game.
+  if (game.active) {
+    if (renderer.hitTest(e.clientX, e.clientY).hit) bridge.gameFocus();
+    return;
+  }
   // frame() runs at the frame budget: don't make a grab wait for the next relaxed frame.
   if (!fpsOverride) renderer.setTargetFps(FPS.lively);
   const hit = renderer.hitTest(e.clientX, e.clientY);
@@ -351,14 +369,14 @@ window.addEventListener(
   'wheel',
   (e) => {
     if (!(e.ctrlKey || e.metaKey)) {
-      if (!interactive || Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+      if (!interactive || game.active || Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
       touch();
       if (pet.isResting) pet.wake();
       else spinBy(-e.deltaX * SPIN_DEG_PER_WHEEL);
       return;
     }
     e.preventDefault(); // no page zoom
-    if (!interactive) return;
+    if (!interactive || game.active) return;
     bridge.scaleBy(Math.exp(-e.deltaY * 0.004));
   },
   { passive: false },
@@ -518,6 +536,7 @@ let lift = 0;
 let appliedLift = 0;
 bridge.onPhysics((p) => {
   console.debug(`[pet] physics ${JSON.stringify(p)}`);
+  if (game.active) return; // (main doesn't fly him while you do)
   if (p.kind === 'drop') pet.endDrag();
   else if (p.kind === 'hang') pet.hang();
   else if (p.kind === 'fly') pet.fly(p.reason);
@@ -526,6 +545,38 @@ bridge.onPhysics((p) => {
     pet.land(p.hard, p.wall ?? null);
   }
 });
+
+// ---------- game mode (see pet/game.ts): main toggles it from the menus, Esc leaves ----------
+bridge.onGame(({ on, x, y }) => {
+  if (!on) return endGame();
+  if (game.active) return game.resync(x ?? window.screenX, y ?? window.screenY); // brought back on screen
+  press = null;
+  if (clicks) clearTimeout(clicks.timer);
+  clicks = null;
+  spin = spinVel = dizziness = 0;
+  swayStart = -Infinity;
+  lift = appliedLift = 0; // started while hanging from the top edge: back to normal framing
+  renderer.setLift(0);
+  pet.setGame(true);
+  game.start(x ?? window.screenX, y ?? window.screenY);
+});
+
+function endGame(): void {
+  if (!game.active) return;
+  const motion = game.stop();
+  setBubble('');
+  pet.setGame(false);
+  bridge.gameEnded(motion); // main flies the rest of a jump
+}
+
+window.addEventListener('keydown', (e) => {
+  if (!game.active) return;
+  if (e.code === 'Escape') return endGame();
+  if (game.keyDown(e.code, e.repeat)) e.preventDefault();
+});
+window.addEventListener('keyup', (e) => game.active && game.keyUp(e.code));
+window.addEventListener('blur', () => game.blur());
+window.addEventListener('focus', () => game.focus());
 
 // ---------- resting: turn him side-on to walk, back to the wall to sit ----------
 let restYaw = 0;
@@ -546,6 +597,13 @@ function frame(now: number): void {
   dragPending = false;
   if (pendingHover && !press) setHover(hoverAt(pendingHover.x, pendingHover.y));
   pendingHover = null;
+  if (game.active) {
+    lastTouched = now;
+    stepGaze(now, dt, false, 0); // head back to straight ahead
+    renderer.setYaw(game.step(dt));
+    renderer.setTargetFps(fpsOverride ?? FPS.lively);
+    return placeOverlays(dt);
+  }
   if (!pet.isFree) lastTouched = now;
   pet.restTick(now - lastTouched);
   restYaw += (restYawTarget() - restYaw) * Math.min(1, dt * 5);
@@ -574,6 +632,11 @@ function frame(now: number): void {
     !!press || hover !== null || pet.isAirborne || pet.isWalking || isSpinning() || dizzy || Math.abs(lift - liftTarget) > 0.002;
   const asleep = pet.agentState === 'sleep' || pet.restPose?.rest === 'asleep';
   renderer.setTargetFps(fpsOverride ?? (lively ? FPS.lively : asleep ? FPS.asleep : FPS.calm));
+  placeOverlays(dt);
+}
+
+/** The speech bubble above his head (or raised hands), and the team strip beside him. */
+function placeOverlays(dt: number): void {
   const top = renderer.headTopScreen();
   if (top) {
     // Above his head, or above his hands when they're up (waving, pleading); eased so it doesn't jitter.

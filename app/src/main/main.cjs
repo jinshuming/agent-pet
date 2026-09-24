@@ -121,7 +121,11 @@ function place(x, y) {
 }
 
 /** The renderer pins its canvas to this size, so a stray pixel of window resize can't rebuild the buffer. */
-const sendSize = () => win?.webContents.send('pet:size', winSize());
+const sendSize = () => {
+  if (!win) return;
+  const { x, y } = win.getBounds();
+  win.webContents.send('pet:size', { ...winSize(), x, y });
+};
 
 /** Where the feet stand, as a fraction of the window height from the top (renderer: 1 - FEET_MARGIN). */
 const FEET_AT = 0.85;
@@ -268,7 +272,10 @@ function createWindow() {
     win.webContents.send('pet:cursor', msg);
   }, CURSOR_POLL_MS);
   // A reload starts the renderer from scratch: send the cursor again.
-  win.webContents.on('did-finish-load', () => (lastCursor = ''));
+  win.webContents.on('did-finish-load', () => {
+    lastCursor = '';
+    gameMode = false; // a reloaded renderer starts out of game mode
+  });
   win.on('closed', () => {
     clearInterval(timer);
     win = null;
@@ -480,6 +487,48 @@ ipcMain.on('pet:release', (_e, v) => {
 ipcMain.on('pet:grab', () => stopPhysics());
 ipcMain.on('pet:let-go', (_e, reason) => letGo(['tired', 'critical'].includes(reason) ? reason : 'poked'));
 
+// ---------- Game mode: you steer him with the keyboard (renderer: pet/game.ts) ----------
+// The renderer runs the physics and tells us where to put the window. It needs the
+// keyboard, so the pet window takes focus; clicking him gives it back after you click away.
+let gameMode = false;
+
+function focusPet() {
+  if (!win) return;
+  if (process.platform === 'darwin') app.focus({ steal: true }); // no Dock icon: we're never the active app otherwise
+  win.focus();
+}
+
+function setGameMode(on) {
+  if (!win || on === gameMode) return;
+  if (!on) return win.webContents.send('pet:game', { on: false }); // the renderer answers with pet:game-ended
+  gameMode = true;
+  stopPhysics();
+  dragOffset = null;
+  if (!win.isVisible()) win.showInactive();
+  focusPet();
+  const { x, y } = win.getBounds();
+  win.webContents.send('pet:game', { on: true, x, y });
+}
+
+ipcMain.on('pet:place', (_e, p) => {
+  if (gameMode) place(Number(p?.x), Number(p?.y));
+});
+ipcMain.on('pet:game-focus', () => gameMode && focusPet());
+// Left game mode (Esc or the menu). Left in mid-jump, he falls the rest of the way.
+ipcMain.on('pet:game-ended', (_e, m) => {
+  gameMode = false;
+  if (!win || m?.grounded !== false) return;
+  const clamp = (n) => Math.max(-MAX_FLING_SPEED, Math.min(MAX_FLING_SPEED, Number(n) || 0));
+  fly(clamp(m.vx), clamp(m.vy), 'hop');
+});
+
+const gameMenuItem = () => ({
+  label: '游戏模式（WASD + 空格）',
+  type: 'checkbox',
+  checked: gameMode,
+  click: () => setGameMode(!gameMode),
+});
+
 // Right-click menu: trigger any agent state by hand, to preview it without Claude Code.
 const AGENT_STATES = [
   ['greet', '打招呼 greet'],
@@ -500,6 +549,8 @@ ipcMain.on('pet:show-menu', (_e, catalog = {}) => {
     click: () => win?.webContents.send('pet:preview', { kind, id }),
   });
   const menu = Menu.buildFromTemplate([
+    gameMenuItem(),
+    { type: 'separator' },
     {
       label: '模拟 Agent 状态',
       submenu: AGENT_STATES.map(([id, label]) => ({
@@ -561,6 +612,7 @@ ipcMain.on('pet:show-menu', (_e, catalog = {}) => {
 //   POST /preview {"kind":"clip"|"reaction","id":"typing"}  same as the right-click previews
 //   POST /scale   {"scale":1.5}  resize the pet (0.1–2.5), same as the 大小 menu
 //   POST /character {"id":"man-in-suit"}  switch character, same as the 切换角色 menu
+//   POST /game    {"on":true}  enter / leave game mode, same as the 游戏模式 menu
 //   GET  /health
 //   GET  /debug/sessions
 //   POST /debug/fling {"vx":1500,"vy":-2500,"x"?,"y"?}  (dev only: like releasing a drag at that velocity)
@@ -660,6 +712,17 @@ function startControlServer() {
       return reply(200, { ok: true, character: body.id });
     }
 
+    if (req.method === 'POST' && url.pathname === '/game') {
+      let body;
+      try {
+        body = await readJson(req);
+      } catch (err) {
+        return reply(400, { error: err.message });
+      }
+      setGameMode(!!body?.on);
+      return reply(200, { ok: true, on: !!body?.on });
+    }
+
     if (req.method === 'POST' && url.pathname === '/scale') {
       let body;
       try {
@@ -695,8 +758,8 @@ function startControlServer() {
       return reply(200, { ok: true, path: out, size: image.getSize() });
     }
 
-    // [{"type":"mouseDown","x":100,"y":300,"wait":16}, …]: replay mouse events into the pet window
-    // (window coordinates) without touching the real cursor. For testing clicks and spins.
+    // [{"type":"mouseDown","x":100,"y":300,"wait":16}, …]: replay mouse (window coordinates) and key
+    // events into the pet window without touching the real cursor. For testing clicks, spins and game mode.
     if (process.env.PET_DEV_URL && req.method === 'POST' && url.pathname === '/debug/input') {
       let events;
       try {
@@ -706,6 +769,12 @@ function startControlServer() {
       }
       if (!Array.isArray(events)) return reply(400, { error: 'expected an array of events' });
       for (const ev of events.slice(0, 500)) {
+        // {"type":"keyDown","key":"Space"} (an Electron key name) steers him in game mode.
+        if (['keyDown', 'keyUp'].includes(ev?.type) && typeof ev.key === 'string') {
+          win.webContents.sendInputEvent({ type: ev.type, keyCode: ev.key.slice(0, 20) });
+          await new Promise((r) => setTimeout(r, Math.min(3000, Math.max(0, Number(ev.wait) || 0))));
+          continue;
+        }
         const type = ['mouseDown', 'mouseUp', 'mouseMove'].includes(ev?.type) ? ev.type : null;
         if (!type) continue;
         const [wx, wy] = win.getPosition();
@@ -848,6 +917,7 @@ function createTray() {
     Menu.buildFromTemplate([
       { label: win?.isVisible() ? '隐藏' : '显示', click: () => (win?.isVisible() ? win.hide() : win?.showInactive()) },
       { label: '回到屏幕上', click: () => bringBack() },
+      gameMenuItem(),
       { type: 'separator' },
       { label: '退出 Agent Pet', click: () => app.quit() },
     ]);
@@ -864,7 +934,10 @@ function bringBack() {
   const { width, height } = winSize();
   place(workArea.x + workArea.width - width - 40, workArea.y + workArea.height - height + feetGapPx(height));
   win.showInactive();
-  win.webContents.send('pet:physics', { kind: 'drop' });
+  const { x, y } = win.getBounds();
+  // In game mode the renderer owns his position: tell it where he is now.
+  if (gameMode) win.webContents.send('pet:game', { on: true, x, y });
+  else win.webContents.send('pet:physics', { kind: 'drop' });
 }
 
 /** After a display goes away, a pet left on it would be invisible: bring it back. */

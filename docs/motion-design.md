@@ -197,3 +197,17 @@ Each prompt ends with the usual *"Feet planted in place, facing forward"* plus e
 - **agent-supervise (loop, 6s)**: hands on hips, turns head and shoulders slowly left, centre, right as if checking on workers, approving nods, now and then points or waves.
 - **permission-urgent (loop, 5s)**: looks straight at the viewer, waves both arms high over the head in big crossing motions, bouncing, cups the hands around the mouth to call out.
 - **permission-knock (loop, 4s)**: leans toward the viewer and knocks on the glass three times, presses both palms flat against it and peers in pleadingly, points at the viewer.
+
+## Game mode (library clips, 2026-09-25, free)
+
+Game mode (right-click → 游戏模式, `pet/game.ts`) lets you steer him with WASD + Space. The renderer runs the physics once per drawn frame and main only places the window. Every clip is from the free PINOC library, made to stay on the spot because the window does the travelling.
+
+| File | Plays | Source | Notes |
+|---|---|---|---|
+| `game-run.glb` | running | Running | make-in-place removed 5.19 m over 2.13 s (2.43 m/s). The game plays it 1.5× faster and moves the window at 1.5 × 2.43 m/s, so the feet don't slide |
+| `game-jump.glb` | in the air | Jump, 0.70–1.10 s | `scripts/trim-clip.mjs` cuts out the push-off and rise. The 0.7 s crouch before take-off was too slow for a key press. Plays once and holds its last frame until he lands; a double jump restarts it |
+| `game-land.glb` | soft landing | Jump, 1.10–1.70 s | The knee bend after touchdown. Running on landing skips it |
+| `game-crouch.glb` | S on the ground | Crouching Idle | Loop as is |
+
+A hard landing (fast-falling with S) reuses `react-land.glb` (Hard Landing). `trim-clip.mjs` pins the pelvis x/z over the clip's first frame (the Jump travels 1 m forward) and keeps the y bob. Run `slim-clips` after it as usual.
+

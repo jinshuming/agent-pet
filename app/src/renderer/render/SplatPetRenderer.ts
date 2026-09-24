@@ -101,6 +101,8 @@ export class SplatPetRenderer {
   private readonly failedClips = new Set<ClipName>();
   /** Bumped by every play(): a play still waiting for its clips to load is dropped if another came after it. */
   private playToken = 0;
+  /** See setPlaybackSpeed. */
+  private speed = 1;
 
   private constructor(
     private readonly scene: Scene,
@@ -278,6 +280,7 @@ export class SplatPetRenderer {
     this.findBones();
     this.appliedYaw = [NaN, NaN, NaN];
     this.setYaw(0);
+    this.character.playbackSpeed = this.speed;
     this.play([{ clip: 'idle', loop: true }]);
     await this.autoFrame();
   }
@@ -323,6 +326,21 @@ export class SplatPetRenderer {
     };
     if (!missing.length) return start();
     void Promise.all(missing.map((c) => this.loadClip(c))).then(start);
+  }
+
+  /** Load clips ahead of time, so the first play() of each starts at once (game mode's run and jump). */
+  preload(clips: ClipName[]): Promise<boolean[]> {
+    return Promise.all(clips.map((c) => this.loadClip(c)));
+  }
+
+  /**
+   * How fast clips play (1 = as authored), kept across clip changes until set again.
+   * Game mode runs faster than the run clip's stride and speeds the clip up to match.
+   */
+  setPlaybackSpeed(speed: number): void {
+    if (speed === this.speed) return;
+    this.speed = speed;
+    this.character.playbackSpeed = speed;
   }
 
   private isLoaded(clip: ClipName): boolean {
@@ -383,7 +401,8 @@ export class SplatPetRenderer {
     const fallback = CLIP_FALLBACK[step.clip];
     const clip: ClipName = this.isLoaded(step.clip) ? step.clip : fallback && this.isLoaded(fallback) ? fallback : 'idle';
     this.touchClip(clip);
-    const ok = this.character.crossfadeTo(clip, { duration: CROSSFADE_S, loop: false });
+    const ok = this.character.crossfadeTo(clip, { duration: step.fade ?? CROSSFADE_S, loop: false });
+    this.character.playbackSpeed = this.speed;
     if (!ok) console.warn(`[pet] clip not found: ${clip}`);
     const a = this.character.armature;
     if (!quiet) console.debug(`[pet] play ${clip} loop=${step.loop} duration=${a.animationDuration.toFixed(2)}`);
@@ -394,7 +413,7 @@ export class SplatPetRenderer {
     if (!step) return;
     if (step.loop) {
       const a = this.character.armature;
-      const blendFrames = CROSSFADE_S * a.frameRate;
+      const blendFrames = (step.fade ?? CROSSFADE_S) * a.frameRate;
       if (a.animationDuration > 0 && a.animationTime >= a.animationDuration - blendFrames - 1) this.startStep(step, true);
       return;
     }
