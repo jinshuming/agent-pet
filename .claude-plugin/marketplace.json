@@ -1,0 +1,16 @@
+{
+  "name": "agent-pet",
+  "owner": {
+    "name": "Shuming Jin"
+  },
+  "plugins": [
+    {
+      "name": "agent-pet",
+      "source": "./plugin",
+      "description": "A 3D Gaussian-splat desktop pet that acts out what Claude Code is doing."
+    }
+  ],
+  "metadata": {
+    "description": "Agent Pet: a 3D desktop pet for Claude Code and Codex"
+  }
+}

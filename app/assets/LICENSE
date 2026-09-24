@@ -1,0 +1,12 @@
+Agent Pet character and motion assets
+Copyright (c) 2026 Shuming Jin
+
+The files in this directory (characters/*.vsplat, motions/*.glb) were made
+with PINOC and are licensed under the Creative Commons
+Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0):
+https://creativecommons.org/licenses/by-nc/4.0/
+
+You may share and adapt them for non-commercial purposes, as long as you give
+appropriate credit. Commercial use requires separate permission.
+
+The source code of Agent Pet is MIT-licensed; see ../../LICENSE.

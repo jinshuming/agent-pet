@@ -1,0 +1,19 @@
+{
+  "name": "agent-pet",
+  "displayName": "Agent Pet",
+  "version": "0.2.0",
+  "description": "A 3D Gaussian-splat desktop pet that acts out what your coding agent (Claude Code or Codex) is doing.",
+  "author": {
+    "name": "Shuming Jin"
+  },
+  "keywords": [
+    "desktop-pet",
+    "hooks",
+    "gaussian-splat",
+    "companion",
+    "codex"
+  ],
+  "homepage": "https://github.com/jinshuming/agent-pet",
+  "repository": "https://github.com/jinshuming/agent-pet",
+  "license": "MIT"
+}

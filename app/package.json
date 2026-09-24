@@ -1,0 +1,20 @@
+{
+  "name": "agent-pet-app",
+  "version": "0.0.1",
+  "private": true,
+  "description": "3D Gaussian-splat desktop pet for Claude Code (prototype)",
+  "main": "src/main/main.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@viggle/splat-engine": "0.1.1",
+    "playcanvas": "2.18.0"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  }
+}
