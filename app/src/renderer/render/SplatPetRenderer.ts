@@ -74,14 +74,25 @@ export class SplatPetRenderer {
   // ---------- frame budget ----------
   // A desktop pet runs all day next to real work, so it renders at `targetFps`
   // (the caller lowers it while nothing fast is happening) instead of the display's
-  // 60–120 Hz. Frames in between skip both the draw and the skinning.
+  // 60–120 Hz. The engine only ticks on frames that get drawn (see scheduleTick): a
+  // rAF on every vsync would keep Chromium's whole frame pipeline running at the
+  // display's rate even when nothing is drawn, which was most of the cost at 15–30 fps.
   private targetFps = 60;
   private lastRenderAt = 0;
   /** Frames autoFrame / measureClips need drawn no matter the budget. */
   private forceRender = 0;
+  /** The display's frame interval, measured between back-to-back vsyncs. */
   private displayDt = 1000 / 60;
-  private lastTickAt = 0;
+  /** The vsync the current tick runs in, so a tick asking for the very next one can measure displayDt. */
+  private vsyncAt = 0;
+  /** A tick sleeping out the budget (see scheduleTick), and the engine tick it will run. */
+  private tickTimer: number | undefined;
+  private pendingTick: FrameRequestCallback | null = null;
   private renders: number[] = [];
+  /** The caller's per-frame work (see onFrame): runs only on frames that get drawn. */
+  private frameHook: ((now: number) => void) | null = null;
+  /** Last body rotation applied (setYaw): the engine re-sorts the splats on every setRotation. */
+  private appliedYaw = [NaN, NaN, NaN];
 
   // ---------- clips on demand (see RESIDENT_CLIPS) ----------
   /** Non-resident clips in memory, least recently played first. */
@@ -97,45 +108,78 @@ export class SplatPetRenderer {
     private readonly canvas: HTMLCanvasElement,
   ) {
     this.findBones();
-    scene.app.autoRender = false;
-    scene.app.on('update', () => {
+    const app = scene.app as typeof scene.app & { requestAnimationFrame(): void; tick: FrameRequestCallback };
+    app.autoRender = false;
+    // PlayCanvas asks for its next tick at the start of every tick; the budget decides when it comes.
+    app.requestAnimationFrame = () => this.scheduleTick(app.tick);
+    app.on('update', () => {
       this.tickSequence();
-      this.budgetFrame();
+      this.drawFrame();
     });
   }
 
-  /** Render (and skin) this frame only if it's due under the frame budget. */
-  private budgetFrame(): void {
+  /** Every engine tick is a drawn frame (scheduleTick only lets due ones through). */
+  private drawFrame(): void {
     const now = performance.now();
-    if (this.lastTickAt) this.displayDt += (Math.min(100, now - this.lastTickAt) - this.displayDt) * 0.05;
-    this.lastTickAt = now;
-    const interval = 1000 / this.targetFps;
-    // Half a display frame of slack, so 30 fps on a 60 Hz display lands on every other frame.
-    const due = this.forceRender > 0 || now - this.lastRenderAt >= interval - this.displayDt / 2;
-    if (!due) return;
     if (this.forceRender > 0) this.forceRender--;
     this.lastRenderAt = now;
+    this.frameHook?.(now);
     this.scene.app.renderNextFrame = true;
     this.renders.push(now);
     if (this.renders.length > 240) this.renders.shift();
   }
 
-  /** Frames per second to draw (10–120). Skinning follows, so skipped frames cost almost nothing. */
+  /**
+   * Called from inside a tick that is about to draw: sleep through most of the frame
+   * interval on a timer, then wait for the vsync the next frame is due on.
+   */
+  private scheduleTick(tick: FrameRequestCallback): void {
+    window.clearTimeout(this.tickTimer);
+    this.pendingTick = tick;
+    // Wake a little after the vsync before the due one, so the rAF lands on the due one.
+    const wait = this.forceRender > 0 ? 0 : 1000 / this.targetFps - this.displayDt * 0.75;
+    if (wait < 1) return this.awaitVsync(this.vsyncAt);
+    this.tickTimer = window.setTimeout(() => this.awaitVsync(), wait);
+  }
+
+  /** `prevVsync`: the vsync this request was made in, if any (then the gap to the next one measures the display). */
+  private awaitVsync(prevVsync?: number): void {
+    this.tickTimer = undefined;
+    requestAnimationFrame((t) => {
+      if (prevVsync) this.displayDt += (Math.min(50, t - prevVsync) - this.displayDt) * 0.1;
+      // Half a display frame of slack, so 30 fps on a 60 Hz display lands on every other frame.
+      const due = this.forceRender > 0 || performance.now() - this.lastRenderAt >= 1000 / this.targetFps - this.displayDt / 2;
+      if (!due) return this.awaitVsync(t);
+      const tick = this.pendingTick;
+      this.pendingTick = null;
+      this.vsyncAt = t;
+      tick?.(t);
+    });
+  }
+
+  /** Stop sleeping out the budget: something needs frames now. */
+  private kick(): void {
+    if (this.tickTimer === undefined) return;
+    window.clearTimeout(this.tickTimer);
+    this.awaitVsync();
+  }
+
+  /** Frames per second to draw (10–120). The engine only ticks for drawn frames, so fewer cost less. */
   setTargetFps(fps: number): void {
     const next = Math.min(120, Math.max(10, Math.round(fps)));
     if (next === this.targetFps) return;
+    const faster = next > this.targetFps;
     this.targetFps = next;
-    this.applySkinningRate();
+    if (faster) this.kick();
   }
 
   get fps(): number {
     return this.targetFps;
   }
 
-  /** Pose evaluation + skinning only on the frames that get drawn. */
-  private applySkinningRate(): void {
-    const displayFps = 1000 / this.displayDt;
-    this.character.armature.updateInterval = Math.max(1, Math.round(displayFps / this.targetFps));
+  /** Run `cb` once per drawn frame, just before the draw. */
+  onFrame(cb: (now: number) => void): void {
+    this.frameHook = cb;
   }
 
   /** Dev: the bones this character's splats are bound to (a subset of the clips' 441). */
@@ -232,7 +276,7 @@ export class SplatPetRenderer {
     this.character = next;
     old.destroy();
     this.findBones();
-    this.applySkinningRate();
+    this.appliedYaw = [NaN, NaN, NaN];
     this.setYaw(0);
     this.play([{ clip: 'idle', loop: true }]);
     await this.autoFrame();
@@ -380,6 +424,10 @@ export class SplatPetRenderer {
    * `pitch`/`roll` tip the body about its feet, for the dizzy sway.
    */
   setYaw(deg: number, pitch = 0, roll = 0): void {
+    // Called every frame; setRotation re-sorts the splats, so skip turns too small to see.
+    const [y0, p0, r0] = this.appliedYaw;
+    if (Math.abs(deg - y0) < 0.05 && Math.abs(pitch - p0) < 0.05 && Math.abs(roll - r0) < 0.05) return;
+    this.appliedYaw = [deg, pitch, roll];
     this.character.setRotation(pitch, 180 + deg, roll);
   }
 
@@ -537,6 +585,7 @@ export class SplatPetRenderer {
     const out: Record<string, { top: number; bottom: number; left: number; right: number; clipped: boolean }> = {};
     const saved = { seq: this.seq, index: this.seqIndex, done: this.onSeqDone };
     this.forceRender = Number.MAX_SAFE_INTEGER;
+    this.kick();
     this.setYaw(0);
     for (const clip of Object.keys(CLIP_FILES) as ClipName[]) {
       if (!(await this.loadClip(clip))) continue;
@@ -576,6 +625,7 @@ export class SplatPetRenderer {
    */
   private async autoFrame(): Promise<void> {
     this.forceRender = Number.MAX_SAFE_INTEGER; // it reads back what was drawn, so draw every frame
+    this.kick();
     try {
       await this.frameCamera();
     } finally {

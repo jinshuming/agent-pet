@@ -255,13 +255,20 @@ function createWindow() {
   }
 
   // Global cursor position → renderer, so the pet can turn toward the mouse
-  // even when the cursor is outside the window.
+  // even when the cursor is outside the window. Only when it (or the window) moved, and not while hidden.
+  let lastCursor = '';
   const timer = setInterval(() => {
-    if (!win || win.isDestroyed()) return;
+    if (!win || win.isDestroyed() || !win.isVisible()) return;
     const b = win.getBounds();
     const c = Date.now() < cursorOverride.until ? { x: b.x + cursorOverride.x, y: b.y + cursorOverride.y } : screen.getCursorScreenPoint();
-    win.webContents.send('pet:cursor', { x: c.x - b.x, y: c.y - b.y, w: b.width, h: b.height });
+    const msg = { x: c.x - b.x, y: c.y - b.y, w: b.width, h: b.height };
+    const key = `${msg.x},${msg.y},${msg.w},${msg.h}`;
+    if (key === lastCursor) return;
+    lastCursor = key;
+    win.webContents.send('pet:cursor', msg);
   }, CURSOR_POLL_MS);
+  // A reload starts the renderer from scratch: send the cursor again.
+  win.webContents.on('did-finish-load', () => (lastCursor = ''));
   win.on('closed', () => {
     clearInterval(timer);
     win = null;

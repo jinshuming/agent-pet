@@ -278,6 +278,8 @@ let pendingHover: { x: number; y: number } | null = null;
 
 window.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
+  // frame() runs at the frame budget: don't make a grab wait for the next relaxed frame.
+  if (!fpsOverride) renderer.setTargetFps(FPS.lively);
   const hit = renderer.hitTest(e.clientX, e.clientY);
   if (!hit.hit) {
     // Beside him: a sideways drag spins him, harder the faster you swipe.
@@ -584,6 +586,6 @@ function frame(now: number): void {
     const head = renderer.headScreen();
     if (head) team.place(nearestWall() === 'left' ? 'right' : 'left', head.y + (head.y - top.y) * 0.6);
   }
-  requestAnimationFrame(frame);
 }
-requestAnimationFrame(frame);
+// Only on frames that get drawn: at 15–30 fps there's no point steering him 120 times a second.
+renderer.onFrame(frame);
