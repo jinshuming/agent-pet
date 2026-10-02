@@ -82,7 +82,7 @@ codex plugin marketplace add jinshuming/agent-pet
 codex plugin add agent-pet@agent-pet
 ```
 
-**2. Trust the hooks in Codex:** start Codex, type `/hooks`, then review and trust the Agent Pet hooks. Codex doesn't run hooks you haven't trusted. You only need to do this once per version.
+**2. Trust the hooks in Codex:** start Codex, type `/hooks`, then review and trust the Agent Pet hooks. Codex doesn't run hooks you haven't trusted. You only need to do this once, and again if an update changes the hooks.
 
 **3. Start a new Codex session** and the pet appears. The first launch also takes a minute or two to download Electron.
 
@@ -342,7 +342,7 @@ claude plugin update agent-pet@agent-pet
 
 Then quit the pet (tray → Quit) and start a new session. If the new version needs different dependencies, they're reinstalled automatically.
 
-**Update (Codex):**
+**Update (Codex):** quit the pet first (tray → Quit), then:
 
 ```bash
 codex plugin marketplace upgrade agent-pet
@@ -352,7 +352,7 @@ codex plugin marketplace upgrade agent-pet
 codex plugin add agent-pet@agent-pet
 ```
 
-Then quit the pet, start a new session, and trust the updated hooks in `/hooks`. If you installed with the script, run `git pull` in the cloned directory instead.
+Then start a new session and, if Codex asks, trust the updated hooks in `/hooks`. An upgrade replaces Codex's copy of the repo, so the first launch afterwards downloads Electron again (a minute or two). If you installed with the script, run `git pull` in the cloned directory instead.
 
 **Uninstall (Claude Code):**
 

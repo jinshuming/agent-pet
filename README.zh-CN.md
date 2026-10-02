@@ -66,7 +66,7 @@ codex plugin marketplace add jinshuming/agent-pet
 codex plugin add agent-pet@agent-pet
 ```
 
-**2. 在 Codex 里信任这些 hook：** 启动 Codex，输入 `/hooks`，审阅并信任 Agent Pet 的 hook。Codex 不会运行没有被信任过的 hook，每个版本只需要做一次。
+**2. 在 Codex 里信任这些 hook：** 启动 Codex，输入 `/hooks`，审阅并信任 Agent Pet 的 hook。Codex 不会运行没有被信任过的 hook。这一步只需要做一次，更新改动了 hook 时才需要再做。
 
 **3. 开一个新的 Codex 会话**，宠物就会出现。第一次启动同样要等一两分钟下载 Electron。
 
@@ -326,7 +326,7 @@ claude plugin update agent-pet@agent-pet
 
 更新后退出宠物（托盘 → 退出），再开一个新会话。如果新版本需要不同的依赖，会自动重新安装。
 
-**更新（Codex）：**
+**更新（Codex）：** 先退出宠物（托盘 → 退出），再运行：
 
 ```bash
 codex plugin marketplace upgrade agent-pet
@@ -336,7 +336,7 @@ codex plugin marketplace upgrade agent-pet
 codex plugin add agent-pet@agent-pet
 ```
 
-然后退出宠物、开新会话，并在 `/hooks` 里信任更新后的 hook。用脚本安装的，改为在克隆的目录里运行 `git pull`。
+然后开新会话；如果 Codex 提示，在 `/hooks` 里信任更新后的 hook。升级会替换 Codex 保存的仓库副本，所以升级后第一次启动会重新下载 Electron（一两分钟）。用脚本安装的，改为在克隆的目录里运行 `git pull`。
 
 **卸载（Claude Code）：**
 
