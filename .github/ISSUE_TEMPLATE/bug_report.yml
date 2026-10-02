@@ -1,0 +1,50 @@
+name: Bug report / 问题反馈
+description: The pet doesn't launch, crashes, or acts out the wrong thing / 宠物没启动、崩溃或演错了
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened / 发生了什么
+      description: What you did, what you expected, and what happened instead. / 你做了什么、期望看到什么、实际看到什么。
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent
+      multiple: true
+      options:
+        - Claude Code
+        - Codex
+        - My own agent (HTTP API) / 自己接入的 agent
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / 系统
+      placeholder: macOS 15.3 (Apple Silicon) / Windows 11
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions / 版本
+      description: Agent Pet version (in plugin.json or `claude plugin list`) and `node -v`. / Agent Pet 版本和 `node -v` 的输出。
+      placeholder: Agent Pet 0.3.0, Node 22.11.0
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log / 日志
+      description: |
+        Set `AGENT_PET_DEBUG=1`, restart the pet, reproduce the problem, then paste the end of the log. macOS: `$TMPDIR/agent-pet.log`, Windows: `%TEMP%\agent-pet.log`. Check it for paths or commands you'd rather not share.
+        设置 `AGENT_PET_DEBUG=1` 后重启宠物，复现问题，然后贴上日志末尾。贴之前看一眼有没有不想公开的路径或命令。
+      render: text
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshot or recording / 截图或录屏
+      description: Optional, but it helps a lot with motion and rendering bugs. / 可选，但对动作和渲染问题很有帮助。

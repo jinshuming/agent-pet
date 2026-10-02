@@ -1,38 +1,58 @@
 # Agent Pet
 
-一个真人感的 3D 桌面宠物，替你的 coding agent（**Claude Code** 或 **Codex**）演出它正在做的事：你发出指令它撸起袖子开始思考，agent 读文件时它捧着平板看、搜代码时手搭凉棚找、跑命令时盯着机器、派出子 Agent 时像队长一样分派任务；需要你授权时它盯着你挥手，等久了会敲屏幕催你；任务完成后先累瘫喘气、再得意比心。它的头会一直跟着你的鼠标转。等待的时候，你可以摸头、戳它、拖着甩飞、转圈转晕；长时间不理它，它会自己走到屏幕边靠墙坐下，再过一会儿靠墙睡着。
+**English** | [简体中文](README.zh-CN.md)
 
-> A 3D Gaussian-splat desktop pet that acts out what Claude Code or Codex is doing: thinking, typing while tools run, begging for permission, panting and then showing off when the turn is done. Install: `/plugin marketplace add jinshuming/agent-pet` then `/plugin install agent-pet@agent-pet` in Claude Code; for Codex see [安装到 Codex](#安装到-codex).
+**A 3D desktop pet that acts out what your coding agent is doing.** Works with Claude Code and Codex, and with any agent that can send an HTTP request.
 
-- [系统要求](#系统要求)
-- [安装到 Claude Code](#安装到-claude-code)
-- [安装到 Codex](#安装到-codex)
-- [使用方法](#使用方法)
-- [接入你自己的 agent](#接入你自己的-agent)
-- [常见问题](#常见问题)
-- [更新与卸载](#更新与卸载)
-- [隐私](#隐私)
-- [开发](#开发)
+<!-- Demo GIF: record it to docs/media/demo.gif, then uncomment the next line. Shot list: docs/media/README.md -->
+<!-- <p align="center"><img src="docs/media/demo.gif" alt="Agent Pet demo" width="720"></p> -->
 
-## 系统要求
+You send a prompt and it rolls up its sleeves and starts thinking. When the agent reads files it studies a tablet. When the agent searches code it shades its eyes and looks around. While a command runs it watches the machine, and when the agent sends out subagents it hands out tasks like a team captain. When the agent needs your permission it turns to you and waves, and if you keep it waiting it knocks on the screen. When the turn is done it collapses, out of breath, then shows off with a finger heart. Its head follows your mouse the whole time.
 
-| | |
-|---|---|
-| 系统 | macOS，或 Windows 10 / 11（在 macOS 上开发；Windows 已适配，但测试较少） |
-| Node.js | 20 或更高版本，且在 `PATH` 里（终端里 `node -v` 能看到版本号）。Claude Code / Codex 用户一般已经有了 |
-| 磁盘 | 约 350 MB，用于 Electron（唯一的运行时依赖），首次启动时自动下载 |
-| 资源占用 | 待机时约占一个 CPU 核心的 8%，内存约 850 MB。它平时按 30 帧渲染，和它互动时 60 帧，睡着时 15 帧，可以放心开一整天 |
+While you wait, you can pat its head, poke it, drag it and fling it across the screen, or spin it until it's dizzy. Ignore it long enough and it walks to the edge of the screen, sits against the wall, and falls asleep.
 
-## 安装到 Claude Code
-
-**1. 在 Claude Code 里运行这两条命令：**
+**Install in Claude Code:**
 
 ```
 /plugin marketplace add jinshuming/agent-pet
 /plugin install agent-pet@agent-pet
 ```
 
-也可以在终端里安装，效果一样：
+Then start a new session. [Codex instructions](#install-for-codex) · [Connect your own agent](#connect-your-own-agent)
+
+- [Requirements](#requirements)
+- [Install for Claude Code](#install-for-claude-code)
+- [Install for Codex](#install-for-codex)
+- [Usage](#usage)
+- [Connect your own agent](#connect-your-own-agent)
+- [FAQ](#faq)
+- [Update and uninstall](#update-and-uninstall)
+- [Privacy](#privacy)
+- [Development](#development)
+- [Contributing](#contributing)
+- [Credits and license](#credits-and-license)
+
+> The pet's menus and speech bubbles are currently in Chinese. Translations are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Requirements
+
+| | |
+|---|---|
+| OS | macOS, or Windows 10 / 11 (developed on macOS; Windows is supported but less tested) |
+| Node.js | 20 or later, on your `PATH` (`node -v` prints a version). Claude Code and Codex users usually have it already |
+| Disk | About 350 MB for Electron, its only runtime dependency, downloaded automatically on first launch |
+| Resources | About 8% of one CPU core and about 850 MB of memory at idle. It renders at 30 fps normally, 60 fps while you interact with it, and 15 fps while asleep, so it's fine to leave running all day |
+
+## Install for Claude Code
+
+**1. Run these two commands in Claude Code:**
+
+```
+/plugin marketplace add jinshuming/agent-pet
+/plugin install agent-pet@agent-pet
+```
+
+Or from a terminal, with the same result:
 
 ```bash
 claude plugin marketplace add jinshuming/agent-pet
@@ -42,17 +62,17 @@ claude plugin marketplace add jinshuming/agent-pet
 claude plugin install agent-pet@agent-pet
 ```
 
-**2. 开一个新的 Claude Code 会话。** 宠物会在会话开始时自动启动。
+**2. Start a new Claude Code session.** The pet launches automatically when a session starts.
 
-- **第一次启动要等一两分钟**：它会在后台下载 Electron（约 350 MB）。如果从 GitHub 下载失败，会自动改用国内镜像 npmmirror.com 重试。进度写在日志里，见[常见问题](#常见问题)。
-- 之后每次开会话，宠物在 1–2 秒内出现；已经在运行时不会重复启动。
-- 同时开多个 Claude Code 会话也没问题，所有会话共用一只宠物。
+- **The first launch takes a minute or two** while Electron (about 350 MB) downloads in the background. If the download from GitHub fails, it retries from the npmmirror.com mirror. Progress goes to the log; see the [FAQ](#faq).
+- After that, the pet appears within 1–2 seconds of each new session, and it won't launch twice if it's already running.
+- Several Claude Code sessions at once are fine. They all share one pet.
 
-## 安装到 Codex
+## Install for Codex
 
-Codex 和 Claude Code 的 hook 格式相同，宠物复用同一套脚本。
+Codex uses the same hook format as Claude Code, so the pet reuses the same scripts.
 
-**1. 克隆仓库并安装 hook：**
+**1. Clone the repo and install the hooks:**
 
 ```bash
 git clone https://github.com/jinshuming/agent-pet.git
@@ -62,111 +82,111 @@ git clone https://github.com/jinshuming/agent-pet.git
 cd agent-pet && node scripts/install-codex.mjs
 ```
 
-安装脚本会把本仓库的 hook 合并进 `~/.codex/hooks.json`，不会动你已有的 hook。
+The installer merges this repo's hooks into `~/.codex/hooks.json` and leaves your existing hooks alone.
 
-**2. 在 Codex 里信任这些 hook：** 启动 Codex，输入 `/hooks`，审阅并信任 Agent Pet 的 hook。Codex 不会运行没有被信任过的 hook，这一步只需要做一次。
+**2. Trust the hooks in Codex:** start Codex, type `/hooks`, then review and trust the Agent Pet hooks. Codex doesn't run hooks you haven't trusted. You only need to do this once.
 
-**3. 开一个新的 Codex 会话**，宠物就会出现。第一次启动同样要等一两分钟下载 Electron。
+**3. Start a new Codex session** and the pet appears. The first launch also takes a minute or two to download Electron.
 
-注意：hook 指向你克隆下来的这个目录，**安装后不要移动或删除这个目录**。如果移动了，在新位置重新运行一次 `node scripts/install-codex.mjs` 即可。
+Note: the hooks point at the directory you cloned, so **don't move or delete it after installing**. If you do move it, run `node scripts/install-codex.mjs` again from the new location.
 
-Claude Code 和 Codex 可以同时用，它们驱动的是同一只宠物；几个会话状态不同时，显示最紧急的那个（等待授权 > 出错 > 工作中 > 思考中 > 完成 > 待机）。
+You can use Claude Code and Codex at the same time; they drive the same pet. When sessions are in different states, the pet shows the most urgent one (waiting for permission > error > working > thinking > done > idle).
 
-## 使用方法
+## Usage
 
-### 它会替 agent 演出什么
+### What it acts out for the agent
 
-不用做任何操作，宠物会跟着 agent 的状态自动切换：
+You don't need to do anything. The pet follows the agent's state:
 
-| agent 在做什么 | 宠物的表现 |
+| What the agent is doing | What the pet does |
 |---|---|
-| 会话开始 | 挥手打招呼 |
-| 你发出新指令 | 「收到！」拍手撸袖子，然后开始思考 |
-| agent 在思考 | 托腮思考；想得久了会换着挠头苦想、掰手指列计划 |
-| 改文件 | 疯狂敲键盘 |
-| 读文件 / 搜代码、查资料 | 捧着平板读 / 手搭凉棚四处找 |
-| 跑命令、调用 MCP 工具 | 按下按钮，抱臂盯着它跑 |
-| 派出子 Agent | 像队长一样指挥分派，然后叉腰看团队干活；每个子 Agent 在它身边显示成一个小卡片，写着它正在做什么，完成时打勾，它会点头「收到汇报」 |
-| 整理上下文（compact） | 整理文件 |
-| 需要你授权、回答问题 | 转过来看着你求批准，气泡变红并写明要做什么（比如「可以运行 npm test 吗？」）；12 秒没人理就挥手喊你，35 秒后敲屏幕 |
-| 任务完成 | 累瘫喘气，然后得意比心 |
-| 出错 | 抱头懊恼，身上泛红 |
-| 没有任务 | 先是整理发型、伸懒腰；等久了挠头、挠痒、踢石子；再久就打哈欠、看表、抱臂抖腿，越等越无聊 |
-| 5 分钟没有任何 agent 活动 | 打个哈欠，走到屏幕边靠墙坐下，很快睡着 |
+| Session starts | Waves hello |
+| You send a new prompt | "Got it!" Claps, rolls up its sleeves, starts thinking |
+| Thinking | Hand on chin. If it thinks for a while, it alternates between scratching its head and counting off a plan on its fingers |
+| Editing files | Types furiously |
+| Reading files / searching code or the web | Reads a tablet / shades its eyes and looks around |
+| Running a command or an MCP tool | Presses a button, then crosses its arms and watches it run |
+| Spawning subagents | Hands out assignments like a captain, then stands hands-on-hips watching the team. Each subagent shows up as a small card beside it saying what it's doing, ticked off when done, and the pet nods to "receive the report" |
+| Compacting context | Tidies up files |
+| Needs your permission or an answer | Turns to look at you and pleads, with a red bubble saying what it wants (for example "Can I run npm test?"). After 12 s with no response it waves at you; after 35 s it knocks on the screen |
+| Turn done | Collapses out of breath, then a proud finger heart |
+| Error | Grabs its head in frustration, glowing red |
+| Nothing to do | Fixes its hair, stretches. Later it scratches its head, scratches an itch, kicks a pebble. Later still it yawns, checks its watch, taps its foot, getting more and more bored |
+| No agent activity for 5 minutes | Yawns, walks to the edge of the screen, sits against the wall, and soon falls asleep |
 
-它的头会跟着你的鼠标转，身体慢慢跟上；鼠标停着不动时，没事做的它会东张西望。忙的时候只偶尔瞟你一眼，等你授权时则一直盯着你。
+Its head follows your mouse and its body slowly catches up. When the mouse is still and it has nothing to do, it looks around. While busy it only glances at you now and then; while waiting for your permission it keeps its eyes on you.
 
-同时开着其他会话时，别的会话里在忙或在等你授权的，也会以小卡片的形式出现在它身边。
+When you have other sessions open, the ones that are busy or waiting for permission also show up as small cards beside it.
 
-### 和它互动
+### Playing with it
 
-| 操作 | 它的反应 |
+| Do this | It reacts |
 |---|---|
-| 点头 / 点身体 | 被摸头害羞 / 被戳怕痒。agent 忙的时候点它，它会不耐烦地说「等一下嘛」 |
-| 双击 / 连点三下 | 比耶拍照 / 头顶比大心 |
-| 拖动 | 被拎起来乱蹬。松手时带点速度就能把它甩出去：会飞、会撞到屏幕两侧反弹，重重落地会头晕 |
-| 往屏幕顶上甩 | 抓住顶边挂着：先双手，15 秒后手酸剩一只手，再撑一会儿就掉下来。慢慢点它会挣扎（也会累得更快），1 秒多内连点 4 下直接把它戳下来 |
-| 放在屏幕左右两侧 | 靠墙耍帅 |
-| 在它**身边的空白处**横向拖动，或按住 ⌥（Windows 上是 Alt）拖动它，或在触控板上双指左右滑 | 原地转圈，划得越快转得越猛；转满 3 圈会头晕站不稳 |
-| 在它身上双指捏合，或按住 ⌘（Windows 上是 Ctrl）滚动滚轮 | 调整大小 |
-| 3 分钟不理它 / 8 分钟不理它 | 走到最近的屏幕边靠墙坐下 / 靠墙睡着；碰它一下就会站起来 |
+| Click its head / body | Shy at the head pat / ticklish at the poke. Click it while the agent is busy and it impatiently says "hang on" |
+| Double-click / triple-click | Peace-sign selfie / big heart over its head |
+| Drag | Kicks its legs while dangling. Let go with some speed and it flies: it bounces off the sides of the screen, and a hard landing leaves it dizzy |
+| Fling it at the top of the screen | Grabs the top edge and hangs: two hands at first, one hand after 15 s when its arms get tired, then it drops. Click it slowly and it struggles (and tires faster); click 4 times within about a second to knock it down |
+| Put it at the left or right edge | Leans against the wall, looking cool |
+| Drag sideways in the **empty space next to it**, hold ⌥ (Alt on Windows) and drag it, or swipe sideways with two fingers on a trackpad | Spins in place, faster the harder you swipe. After 3 full turns it's too dizzy to stand |
+| Pinch on it, or hold ⌘ (Ctrl on Windows) and scroll | Resize |
+| Ignore it for 3 minutes / 8 minutes | Walks to the nearest screen edge and sits against the wall / falls asleep against the wall. Touch it and it gets up |
 
-### 右键菜单
+### Right-click menu
 
-在宠物身上点右键：
+Right-click the pet:
 
-- **切换角色**：默认是 Young Man，内置 8 个角色（Asian Actor、Man in Suit、Young Man、DJ Neko、Chibi Guitarist、Satoru Gojo、Creepy Log Man、Miles Morales）。
-- **大小**：默认 75%。可以选 10%–250% 的预设，或者「自定义…」输入任意百分比（最大值取决于屏幕高度）。
-- **游戏模式（WASD + 空格）**：用键盘操控角色在桌面上像横版游戏一样跑跳，见下面的[游戏模式](#游戏模式)。
-- **模拟 Agent 状态 / 模拟互动 / 预览单个动作**：不用等 agent，直接看各种状态和动作，包括「休息：走到墙边坐下 / 靠墙睡着」。
-- **退出**。
+- **Switch character**: Young Man by default. 8 characters are built in: Asian Actor, Man in Suit, Young Man, DJ Neko, Chibi Guitarist, Satoru Gojo, Creepy Log Man, Miles Morales. Satoru Gojo and Miles Morales are unofficial fan works; see [Credits and license](#credits-and-license).
+- **Size**: 75% by default. Pick a preset from 10% to 250%, or choose "Custom…" and enter any percentage (the maximum depends on your screen height).
+- **Game mode (WASD + Space)**: steer the character around your desktop like a side-scroller. See [Game mode](#game-mode).
+- **Simulate agent state / Simulate interaction / Preview a single motion**: see every state and motion without waiting for an agent, including "Rest: walk to the wall and sit / fall asleep against the wall".
+- **Quit**.
 
-角色和大小会记住，下次启动沿用（保存在 `~/.agent-pet/settings.json`）。
+Character and size are remembered for next time (in `~/.agent-pet/settings.json`).
 
-### 游戏模式
+### Game mode
 
-右键菜单（或托盘图标菜单）勾选 **游戏模式**，宠物会接管键盘，你可以操控他在桌面上跑跳：
+Check **Game mode** in the right-click menu (or the tray menu) and the pet takes over the keyboard so you can run and jump around the desktop:
 
-| 按键 | 动作 |
+| Key | Action |
 |---|---|
-| A / D（或 ← / →） | 左右跑 |
-| 空格 / W / ↑ | 跳。按得越久跳得越高；空中再按一次二段跳；贴着屏幕左右边缘时按是蹬墙跳 |
-| S / ↓ | 地上是蹲下；空中是加速下落，落得够猛会重重落地 |
-| Esc | 退出游戏模式（在空中退出的话，他会按当时的速度继续飞完） |
+| A / D (or ← / →) | Run left / right |
+| Space / W / ↑ | Jump. Hold longer to jump higher; press again in the air to double-jump; press against the left or right screen edge to wall-jump |
+| S / ↓ | Crouch on the ground; dive in the air, and a hard enough dive ends in a heavy landing |
+| Esc | Leave game mode (if you leave mid-air, it finishes the jump with the speed it had) |
 
-地面是 Dock 上沿，两侧是屏幕边缘（在空中贴墙按住方向键会贴墙下滑），天花板是菜单栏。点别的窗口后键盘会被拿走，他会停下来等你，点一下他就能继续玩。游戏模式里 agent 的状态照常记录，退出后他马上接着演。
+The floor is the top of the Dock, the walls are the screen edges (hold a direction against a wall in mid-air to wall-slide), and the ceiling is the menu bar. When you click another window the keyboard goes with it, so the pet stops and waits; click it to keep playing. Agent state keeps being tracked during game mode, and the pet picks up acting it out as soon as you leave.
 
-### 托盘图标
+### Tray icon
 
-菜单栏（macOS）或任务栏右下角（Windows）有一个爪印图标，可以**显示 / 隐藏**宠物、把它**找回屏幕上**（比如它被拖到屏幕外，或者拔掉了外接显示器），以及**退出**。
+The paw-print icon in the menu bar (macOS) or the taskbar notification area (Windows) lets you **show / hide** the pet, **bring it back on screen** (say it was dragged off-screen or you unplugged an external monitor), and **quit**.
 
-宠物退出后，下次开 Claude Code / Codex 会话时会自动重新启动。
+After you quit the pet, it launches again with your next Claude Code / Codex session.
 
-## 接入你自己的 agent
+## Connect your own agent
 
-宠物不绑定 Claude Code 或 Codex。它在本机开了一个 HTTP 服务，任何 agent 只要在工作时把生命周期事件发过来，宠物就会跟着演出。
+The pet isn't tied to Claude Code or Codex. It runs a local HTTP server, and any agent that sends it lifecycle events while it works gets acted out.
 
-### 第一步：启动宠物
+### Step 1: launch the pet
 
-在你的 agent 启动时运行一次下面的命令（宠物已经在运行时它什么也不做，会立即返回；第一次运行会先下载 Electron）：
+Run this once when your agent starts. If the pet is already running it does nothing and returns immediately; the first run downloads Electron first.
 
 ```bash
 node /path/to/agent-pet/plugin/scripts/launch.mjs
 ```
 
-也可以在仓库的 `app` 目录下手动运行 `npm start`。宠物启动后，`GET http://127.0.0.1:23456/health` 返回 `{"ok":true}`。
+You can also run `npm start` in the repo's `app` directory. Once the pet is up, `GET http://127.0.0.1:23456/health` returns `{"ok":true}`.
 
-### 第二步：发送事件
+### Step 2: send events
 
-有两种接法，任选一种。
+There are two ways to do it; pick either.
 
-**方式一：你的 agent 已经能产出 Claude Code 格式的 hook JSON**（含 `hook_event_name`、`session_id`、`tool_name`、`tool_input` 等字段）：把这段 JSON 通过标准输入交给 `emit.mjs`。它会裁掉敏感内容、转成宠物的事件格式并发送，宠物没运行时也会安静退出。
+**Option 1: your agent already produces Claude Code–style hook JSON** (with `hook_event_name`, `session_id`, `tool_name`, `tool_input` and so on). Pipe that JSON to `emit.mjs` on stdin. It strips sensitive content, converts it to the pet's event format and sends it, and exits quietly if the pet isn't running.
 
 ```bash
 echo '{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/my/project","tool_name":"Bash","tool_input":{"command":"npm test"}}' | node /path/to/agent-pet/plugin/scripts/emit.mjs
 ```
 
-**方式二：直接 POST 事件**到 `http://127.0.0.1:23456/event`，请求体是 JSON：
+**Option 2: POST events directly** to `http://127.0.0.1:23456/event` with a JSON body:
 
 ```json
 {
@@ -174,53 +194,53 @@ echo '{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/my/project","too
   "session": "my-agent-run-42",
   "cwd": "/my/project",
   "tool": "Bash",
-  "toolInput": { "command": "npm test", "description": "运行测试" }
+  "toolInput": { "command": "npm test", "description": "Run the tests" }
 }
 ```
 
-| 字段 | 必填 | 说明 |
+| Field | Required | Description |
 |---|---|---|
-| `event` | 是 | 事件名，见下表 |
-| `session` | 否 | 会话 id。同一次任务用同一个值；多个会话同时在跑时，宠物显示最紧急的那个。不填就当成同一个会话 `default` |
-| `cwd` | 否 | 工作目录。几个会话在不同项目里时，气泡前面会加上项目名 |
-| `tool` | 否 | 工具名，决定工作时气泡显示什么（见下文） |
-| `toolInput` | 否 | `command`、`filePath`、`pattern`、`description`，都是字符串，用来生成气泡文字。**请只放简短的摘要，不要放文件内容或输出** |
-| `notificationType` | 否 | 配合 `Notification` 事件，见下表 |
-| `errorType` | 否 | 配合 `StopFailure` 事件，显示在气泡里的出错原因 |
+| `event` | Yes | Event name; see the table below |
+| `session` | No | Session id. Use the same value for one task. When several sessions run at once, the pet shows the most urgent one. Defaults to a single session called `default` |
+| `cwd` | No | Working directory. When sessions are in different projects, the bubble is prefixed with the project name |
+| `tool` | No | Tool name, which decides the bubble text while working (see below) |
+| `toolInput` | No | `command`, `filePath`, `pattern`, `description`, all strings, used to build the bubble text. **Send short summaries only, never file contents or output** |
+| `notificationType` | No | Used with the `Notification` event; see below |
+| `errorType` | No | Used with the `StopFailure` event; the error reason shown in the bubble |
 
-### 事件与宠物状态
+### Events and pet states
 
-| `event` | 宠物的表现 |
+| `event` | What the pet does |
 |---|---|
-| `SessionStart` | 挥手打招呼 |
-| `UserPromptSubmit` | 开始思考 |
-| `PreToolUse` | 开始工作（敲键盘），气泡显示当前工具 |
-| `PostToolUse` | 工具结束。1.5 秒内没有下一个工具就回到思考状态，所以连续的工具调用不会闪烁 |
-| `PostToolUseFailure` | 工具失败：短暂懊恼一下，然后继续思考 |
-| `PermissionRequest` | 挥手求批准，直到下一个 `PostToolUse`、`Stop` 等事件 |
-| `Notification` | `notificationType` 为 `permission_prompt` 或 `agent_needs_input` 时求批准，为 `idle_prompt` 时回到待机 |
-| `SubagentStart` / `SubagentStop` | 派出 / 收回子 agent，子 agent 在跑时保持工作状态 |
-| `PreCompact` | 思考中（气泡显示「整理上下文」） |
-| `Stop` | 任务完成：累瘫喘气再比心，然后待机 |
-| `StopFailure` | 任务出错：抱头懊恼，身上泛红，然后待机 |
-| `Interrupt` | 被用户中断，直接回到待机 |
-| `SessionEnd` | 会话结束，从宠物的会话列表里移除 |
+| `SessionStart` | Waves hello |
+| `UserPromptSubmit` | Starts thinking |
+| `PreToolUse` | Starts working (typing), with the current tool in the bubble |
+| `PostToolUse` | Tool finished. If no new tool starts within 1.5 s it goes back to thinking, so back-to-back tool calls don't flicker |
+| `PostToolUseFailure` | Tool failed: a brief moment of frustration, then back to thinking |
+| `PermissionRequest` | Pleads for approval until the next `PostToolUse`, `Stop` or similar event |
+| `Notification` | Pleads for approval when `notificationType` is `permission_prompt` or `agent_needs_input`; back to idle when it's `idle_prompt` |
+| `SubagentStart` / `SubagentStop` | Sends out / takes back a subagent; stays in the working state while subagents run |
+| `PreCompact` | Thinking (the bubble says it's tidying up context) |
+| `Stop` | Turn done: collapses out of breath, finger heart, then idle |
+| `StopFailure` | Turn failed: grabs its head, glows red, then idle |
+| `Interrupt` | Interrupted by the user; straight back to idle |
+| `SessionEnd` | Session over; removed from the pet's session list |
 
-最简单的一轮是：`UserPromptSubmit` → 若干对 `PreToolUse` / `PostToolUse` → `Stop`。
+The simplest turn is `UserPromptSubmit` → some `PreToolUse` / `PostToolUse` pairs → `Stop`.
 
-工作状态下，气泡按 `tool` 生成：`Bash` 显示 `description` 或 `command`；`Edit`、`Write`、`apply_patch` 显示文件名；`Read`、`Grep`、`Glob` 显示文件名或 `pattern`；`WebFetch`、`WebSearch` 显示「查资料」；`mcp__服务__工具` 显示「🔌 服务.工具」；其他工具显示「🛠 工具名」。`tool` 为 `AskUserQuestion` 或 `ExitPlanMode` 的 `PreToolUse` 会被当成在等用户回答。
+While working, the bubble depends on `tool`: `Bash` shows `description` or `command`; `Edit`, `Write` and `apply_patch` show the file name; `Read`, `Grep` and `Glob` show the file name or `pattern`; `WebFetch` and `WebSearch` show that it's looking things up; `mcp__server__tool` shows "🔌 server.tool"; any other tool shows "🛠 tool name". A `PreToolUse` whose `tool` is `AskUserQuestion` or `ExitPlanMode` counts as waiting for the user's answer.
 
-一个会话 10 分钟没有任何事件会被当成已经结束（比如 agent 崩溃了），5 分钟没有任何会话有活动，宠物就会睡着。
+A session with no events for 10 minutes is treated as ended (say the agent crashed), and when no session has had activity for 5 minutes the pet falls asleep.
 
-### 示例
+### Examples
 
-用 curl 模拟一轮完整的任务：
+Simulate a full turn with curl:
 
 ```bash
 for e in UserPromptSubmit PreToolUse PostToolUse Stop; do curl -s -X POST -d "{\"event\":\"$e\",\"session\":\"demo\",\"tool\":\"Bash\",\"toolInput\":{\"command\":\"npm test\"}}" http://127.0.0.1:23456/event; sleep 2; done
 ```
 
-Node.js：
+Node.js:
 
 ```js
 const pet = (event, extra = {}) =>
@@ -228,7 +248,7 @@ const pet = (event, extra = {}) =>
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ event, session: 'my-agent', ...extra }),
-  }).catch(() => {}); // 宠物没运行时忽略
+  }).catch(() => {}); // ignore when the pet isn't running
 
 await pet('UserPromptSubmit');
 await pet('PreToolUse', { tool: 'Edit', toolInput: { filePath: 'src/app.ts' } });
@@ -236,7 +256,7 @@ await pet('PostToolUse', { tool: 'Edit' });
 await pet('Stop');
 ```
 
-Python：
+Python:
 
 ```python
 import json, urllib.request
@@ -246,56 +266,56 @@ def pet(event, **extra):
     try:
         urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:23456/event", body, {"Content-Type": "application/json"}), timeout=0.5)
     except OSError:
-        pass  # 宠物没运行时忽略
+        pass  # ignore when the pet isn't running
 
 pet("PreToolUse", tool="Bash", toolInput={"command": "pytest"})
 ```
 
-### 不走生命周期、直接指定状态
+### Set the state directly, without lifecycle events
 
-如果你的 agent 没有「工具调用」这类概念，可以直接切换宠物状态：
+If your agent has no notion of tool calls, you can switch the pet's state directly:
 
 ```bash
 curl -X POST -d '{"state":"working"}' http://127.0.0.1:23456/state
 ```
 
-`state` 可选 `greet`、`idle`、`thinking`、`working`、`permission`、`done`、`error`、`sleep`。它会绕过会话逻辑直接生效，但下一个 `/event` 事件到来时会被覆盖，所以两种方式不要混用。
+`state` is one of `greet`, `idle`, `thinking`, `working`, `permission`, `done`, `error`, `sleep`. It takes effect immediately, bypassing the session logic, but the next `/event` overrides it, so don't mix the two approaches.
 
-### 注意事项
+### Notes
 
-- **只能从本机的程序调用**，比如你 agent 的后端进程、CLI 或脚本。宠物会拒绝一切来自浏览器的请求（带 `Origin` 或 `Sec-Fetch-Site` 请求头的，或 `Host` 不是 `127.0.0.1` / `localhost` 的），以防网页操控它。所以如果你的 agent 界面是网页或 Electron 渲染进程，请从后端或主进程发送事件。
-- 请求体最大 16 KB；发送要异步、超时要短（`emit.mjs` 用的是 400 ms），宠物没运行时直接忽略错误，不要让它拖慢你的 agent。
-- 端口可以用环境变量 `AGENT_PET_PORT` 修改，你的 agent 和宠物要用同一个值。
-- 想改台词、动作或状态逻辑：台词在 `app/src/renderer/pet/lines.ts`，状态与动作的对应在 `app/src/renderer/pet/clips.ts`，事件到状态的转换在 `app/src/main/agent-sessions.cjs`。开发方法见[开发](#开发)。
+- **Only local programs can call it**, such as your agent's backend process, CLI or scripts. The pet rejects anything that looks like a browser request (an `Origin` or `Sec-Fetch-Site` header, or a `Host` other than `127.0.0.1` / `localhost`) so web pages can't control it. If your agent's UI is a web page or an Electron renderer, send events from the backend or main process.
+- Request bodies are capped at 16 KB. Send asynchronously with a short timeout (`emit.mjs` uses 400 ms) and ignore errors when the pet isn't running, so it never slows your agent down.
+- Change the port with the `AGENT_PET_PORT` environment variable; your agent and the pet must use the same value.
+- To change the lines, motions or state logic: lines are in `app/src/renderer/pet/lines.ts`, the state-to-motion mapping is in `app/src/renderer/pet/clips.ts`, and the event-to-state logic is in `app/src/main/agent-sessions.cjs`. See [Development](#development).
 
-## 常见问题
+## FAQ
 
-**第一次装完，开了新会话但宠物没出现？**
-第一次要下载 Electron，等一两分钟。进度和错误都在日志里：
+**I installed it and started a new session, but no pet?**
+The first launch downloads Electron, so give it a minute or two. Progress and errors are in the log:
 
-- macOS：`$TMPDIR/agent-pet.log`（在终端里运行 `open $TMPDIR/agent-pet.log`）
-- Windows：`%TEMP%\agent-pet.log`
+- macOS: `$TMPDIR/agent-pet.log` (run `open $TMPDIR/agent-pet.log` in a terminal)
+- Windows: `%TEMP%\agent-pet.log`
 
-日志里出现 `starting` 就说明已经启动了。如果显示安装失败（比如网络问题），下次开会话时会自动重试。
+A `starting` line means it has launched. If the install failed (a network problem, say), it retries with your next session.
 
-**提示 `node` 找不到？**
-安装 [Node.js](https://nodejs.org) 20 或更高版本，确保终端里 `node -v` 能用，然后重开一个会话。
+**It says `node` isn't found?**
+Install [Node.js](https://nodejs.org) 20 or later, make sure `node -v` works in a terminal, then start a new session.
 
-**宠物找不到了？**
-点托盘图标 → **回到屏幕上**。
+**Lost the pet?**
+Tray icon → **Bring back on screen**.
 
-**23456 端口被别的程序占用了？**
-设置环境变量 `AGENT_PET_PORT` 换一个端口。Claude Code / Codex 和宠物要用同一个值，改完后重开会话。
+**Port 23456 is taken by another program?**
+Set the `AGENT_PET_PORT` environment variable to another port. Claude Code / Codex and the pet must use the same value; start a new session after changing it.
 
-**不想让它每次开会话都自动启动？**
-设置环境变量 `AGENT_PET_NO_LAUNCH=1`。需要时可以手动启动：在仓库的 `app` 目录下运行 `npm start`。
+**Don't want it to launch with every session?**
+Set `AGENT_PET_NO_LAUNCH=1`. Launch it by hand when you want it: run `npm start` in the repo's `app` directory.
 
-**要把问题报告给开发者？**
-设置 `AGENT_PET_DEBUG=1` 后重启宠物，日志会记录每个 agent 事件和渲染日志。附上日志提一个 [issue](https://github.com/jinshuming/agent-pet/issues)。
+**Reporting a problem?**
+Set `AGENT_PET_DEBUG=1` and restart the pet; the log then records every agent event and the renderer log. Open an [issue](https://github.com/jinshuming/agent-pet/issues) with the log attached.
 
-## 更新与卸载
+## Update and uninstall
 
-**更新（Claude Code）：**
+**Update (Claude Code):**
 
 ```bash
 claude plugin marketplace update agent-pet
@@ -305,11 +325,11 @@ claude plugin marketplace update agent-pet
 claude plugin update agent-pet@agent-pet
 ```
 
-更新后退出宠物（托盘 → 退出），再开一个新会话。如果新版本需要不同的依赖，会自动重新安装。
+Then quit the pet (tray → Quit) and start a new session. If the new version needs different dependencies, they're reinstalled automatically.
 
-**更新（Codex）：** 在克隆的目录里运行 `git pull`，然后退出宠物、开新会话。
+**Update (Codex):** run `git pull` in the cloned directory, then quit the pet and start a new session.
 
-**卸载（Claude Code）：**
+**Uninstall (Claude Code):**
 
 ```bash
 claude plugin uninstall agent-pet@agent-pet
@@ -319,23 +339,23 @@ claude plugin uninstall agent-pet@agent-pet
 claude plugin marketplace remove agent-pet
 ```
 
-**卸载（Codex）：** 在克隆的目录里运行 `node scripts/install-codex.mjs --uninstall`，然后删掉这个目录。
+**Uninstall (Codex):** run `node scripts/install-codex.mjs --uninstall` in the cloned directory, then delete the directory.
 
-卸载后可以删掉 `~/.agent-pet` 文件夹，里面只有设置和 app 位置记录。
+After uninstalling you can delete the `~/.agent-pet` folder; it only holds settings and the app location.
 
-## 隐私
+## Privacy
 
-- 所有数据只在你的电脑上流转：hook 只把事件名、会话 id、工作目录、工具名，以及截短的命令或文件路径发给本机的 `127.0.0.1`。**你的指令内容、文件内容和工具输出都不会离开 hook。**
-- 宠物的本地服务只接受本机程序的请求，网页发来的请求一律拒绝。
-- 有两件事 Claude Code 的 hook 不会上报：按 Esc 中断，以及拒绝授权。这两件事是宠物在本地读取会话记录文件得知的（`app/src/main/transcript-tail.cjs`）：只读会话忙碌期间新增的行，只检查这两个标记，什么也不保存。Codex 自带 `Interrupt` hook，不需要这样做。
+- Everything stays on your computer. The hooks only send the event name, session id, working directory, tool name, and a truncated command or file path, and only to `127.0.0.1`. **Your prompts, file contents and tool output never leave the hook.** There is no telemetry.
+- The pet's local server only accepts requests from local programs and rejects anything from a web page.
+- Claude Code hooks don't report two things: pressing Esc to interrupt, and denying permission. The pet learns about these by reading the session transcript locally (`app/src/main/transcript-tail.cjs`). It only reads lines added while the session is busy, only checks for those two markers, and saves nothing. Codex has its own `Interrupt` hook, so this isn't needed there.
 
-## 开发
+## Development
 
 ```
-plugin/    Claude Code 插件：转发生命周期事件的 hook（没有 npm 依赖）；Codex 复用同一套脚本
-app/       Electron + PlayCanvas + @viggle/splat-engine 桌面宠物
+plugin/    Claude Code plugin: hooks that forward lifecycle events (no npm dependencies); Codex reuses the same scripts
+app/       Electron + PlayCanvas + @viggle/splat-engine desktop pet
 scripts/   install-codex.mjs
-docs/      动作设计：每个动作的提示词、选样理由和处理流程
+docs/      Motion design: each motion's prompt, why that sample was picked, and the processing pipeline
 ```
 
 ```bash
@@ -346,17 +366,17 @@ cd app && npm install
 npm run dev
 ```
 
-`npm run dev` 用 Vite 开发服务器运行宠物，支持热更新，并开启 `/debug/*` 调试接口。想让 Claude Code 会话连到这份代码，在仓库根目录运行 `claude --plugin-dir ./plugin`。
+`npm run dev` runs the pet on the Vite dev server with hot reload and turns on the `/debug/*` endpoints. To connect a Claude Code session to this checkout, run `claude --plugin-dir ./plugin` from the repo root.
 
-- 用户运行的是 `app/dist/` 里构建好的渲染层（已提交到仓库，所以用户只需要装 Electron）。**改了 `app/src/renderer/` 下的代码，要运行 `npm run build` 并连同 `dist/` 一起提交**，否则 CI 会报错。
-- 新生成的 PINOC 动作要先运行 `npm run slim-clips`，把骨骼精简到角色用的 86 根，CI 也会检查这一点。详见 [docs/motion-design.md](docs/motion-design.md)。
-- 事件流：
+- Users run the prebuilt renderer in `app/dist/` (it's committed, so users only need to install Electron). **If you change anything under `app/src/renderer/`, run `npm run build` and commit `dist/` along with it**, or CI fails.
+- Newly generated PINOC motions must go through `npm run slim-clips`, which trims the skeleton to the 86 bones the characters use; CI checks this too. See [docs/motion-design.md](docs/motion-design.md).
+- Event flow:
 
 ```
-Claude Code / Codex hook（异步）→ plugin/scripts/emit.mjs → POST 127.0.0.1:23456/event
-  → app/src/main/agent-sessions.cjs   每个会话一份状态，最紧急的胜出
-  → renderer PetController            拖拽 > 授权/出错 > 互动反应 > agent 状态
-  → SplatPetRenderer                  在 splat 角色上交叉淡入 PINOC 动作
+Claude Code / Codex hook (async) → plugin/scripts/emit.mjs → POST 127.0.0.1:23456/event
+  → app/src/main/agent-sessions.cjs   one state per session, most urgent wins
+  → renderer PetController            drag > permission/error > interaction reactions > agent state
+  → SplatPetRenderer                  crossfades PINOC motions on the splat character
 ```
 
 ```bash
@@ -367,17 +387,23 @@ curl -s localhost:23456/debug/sessions
 curl -X POST -d '{"state":"done"}' localhost:23456/state
 ```
 
-第一条查看每个会话的实时状态，第二条强制切换到某个状态。
+The first shows each session's live state; the second forces a state.
 
-| 环境变量 | 作用 |
+| Environment variable | Effect |
 |---|---|
-| `AGENT_PET_PORT` | 换端口（默认 23456；agent 和宠物要设成同一个值） |
-| `AGENT_PET_NO_LAUNCH=1` | 开会话时不自动启动宠物 |
-| `AGENT_PET_APP_DIR` | 让启动器使用另一份 app 目录 |
-| `AGENT_PET_DEBUG=1` | 记录每个 hook 事件和渲染日志，并开启只读的 `/debug/stats` |
+| `AGENT_PET_PORT` | Change the port (default 23456; the agent and the pet must match) |
+| `AGENT_PET_NO_LAUNCH=1` | Don't launch the pet when a session starts |
+| `AGENT_PET_APP_DIR` | Make the launcher use a different app directory |
+| `AGENT_PET_DEBUG=1` | Log every hook event and the renderer log, and turn on the read-only `/debug/stats` |
 
-## 致谢与许可
+## Contributing
 
-角色和动作用 [PINOC](https://viggle.ai/pinoc/app) 制作，由 [@viggle/splat-engine](https://www.npmjs.com/package/@viggle/splat-engine)（MIT）在 [PlayCanvas](https://playcanvas.com) 上渲染。
+Issues and PRs are welcome: new lines, new motions, new characters, translations, support for more agents. Start with [CONTRIBUTING.md](CONTRIBUTING.md), which covers the dev workflow and how to submit a character.
 
-代码采用 [MIT](LICENSE) 许可；`app/assets/` 里的角色和动作文件采用 [CC BY-NC 4.0](app/assets/LICENSE)，可以免费用于非商业用途，使用时请注明出处。
+## Credits and license
+
+Characters and motions were made with [PINOC](https://viggle.ai/pinoc/app) and are rendered by [@viggle/splat-engine](https://www.npmjs.com/package/@viggle/splat-engine) (MIT) on [PlayCanvas](https://playcanvas.com).
+
+The code is [MIT](LICENSE)-licensed. The character and motion files in `app/assets/` are licensed under [CC BY-NC 4.0](app/assets/LICENSE): free for non-commercial use, with attribution.
+
+Satoru Gojo (*Jujutsu Kaisen*) and Miles Morales (Marvel's *Spider-Man*) are **unofficial fan works**. They are not affiliated with or endorsed by the original rights holders, who own all rights to those characters, and they are for non-commercial use only. If you are a rights holder and want one removed, please [open an issue](https://github.com/jinshuming/agent-pet/issues) and we'll take care of it promptly.

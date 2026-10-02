@@ -1,0 +1,22 @@
+name: Idea / 想法与建议
+description: A new motion, reaction, line, agent integration, or anything else / 新动作、新反应、新台词、接入新的 agent，或其他想法
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea / 想法
+      description: What should the pet do, and when? For a motion, describe it the way you'd act it out. / 宠物应该在什么时候做什么？如果是动作，像演出来一样描述它。
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why / 为什么
+      description: What moment in your day with an agent would this make better? / 它会让你和 agent 一起工作的哪个时刻变得更好？
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Help / 参与
+      options:
+        - label: I'd like to send a PR for this / 我愿意为此提 PR

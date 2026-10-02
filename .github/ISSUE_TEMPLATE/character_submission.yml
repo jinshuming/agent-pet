@@ -1,0 +1,48 @@
+name: Character submission / 角色投稿
+description: Propose a character for the built-in list / 推荐一个角色收进内置列表
+labels: [character]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read the character section of [CONTRIBUTING.md](https://github.com/jinshuming/agent-pet/blob/main/CONTRIBUTING.md#submitting-a-character) first.
+        请先阅读 [CONTRIBUTING.md](https://github.com/jinshuming/agent-pet/blob/main/CONTRIBUTING.md#submitting-a-character) 中关于角色的部分。
+  - type: input
+    id: name
+    attributes:
+      label: Character name / 角色名
+    validations:
+      required: true
+  - type: input
+    id: pinoc
+    attributes:
+      label: PINOC asset id or link / PINOC 资源 id 或链接
+    validations:
+      required: true
+  - type: dropdown
+    id: origin
+    attributes:
+      label: Origin / 来源
+      options:
+        - Original character / 原创角色
+        - Fan work of an existing character / 已有角色的同人二创
+    validations:
+      required: true
+  - type: textarea
+    id: preview
+    attributes:
+      label: Preview / 预览
+      description: A screenshot or short recording of the character as the pet, ideally idle plus one or two motions. / 角色作为宠物时的截图或短录屏，最好有待机和一两个动作。
+    validations:
+      required: true
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Terms / 条款
+      options:
+        - label: I made this character (or have the right to share it), and agree to license it under CC BY-NC 4.0 like the other assets. / 角色是我做的（或我有权分享），并同意和其他素材一样采用 CC BY-NC 4.0 许可。
+          required: true
+        - label: It isn't a likeness of a real person, unless that person agreed. / 它不是某个真人的形象，除非本人同意。
+          required: true
+        - label: The .vsplat is the optimized export and is under 2 MB. / .vsplat 是优化后导出的版本，小于 2 MB。
+          required: true
