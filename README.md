@@ -70,9 +70,26 @@ claude plugin install agent-pet@agent-pet
 
 ## Install for Codex
 
-Codex uses the same hook format as Claude Code, so the pet reuses the same scripts.
+Codex reads Claude Code–style plugins, so Agent Pet installs the same way.
 
-**1. Clone the repo and install the hooks:**
+**1. Add the marketplace and install the plugin from a terminal:**
+
+```bash
+codex plugin marketplace add jinshuming/agent-pet
+```
+
+```bash
+codex plugin add agent-pet@agent-pet
+```
+
+**2. Trust the hooks in Codex:** start Codex, type `/hooks`, then review and trust the Agent Pet hooks. Codex doesn't run hooks you haven't trusted. You only need to do this once per version.
+
+**3. Start a new Codex session** and the pet appears. The first launch also takes a minute or two to download Electron.
+
+Tested with Codex CLI 0.160. If your Codex doesn't have `codex plugin` yet, update it, or use the install script instead:
+
+<details>
+<summary>Install with the script (older Codex, or to run from a checkout)</summary>
 
 ```bash
 git clone https://github.com/jinshuming/agent-pet.git
@@ -82,13 +99,11 @@ git clone https://github.com/jinshuming/agent-pet.git
 cd agent-pet && node scripts/install-codex.mjs
 ```
 
-The installer merges this repo's hooks into `~/.codex/hooks.json` and leaves your existing hooks alone.
+The script merges this repo's hooks into `~/.codex/hooks.json` and leaves your existing hooks alone. Then trust them with `/hooks` as above. The hooks point at the directory you cloned, so **don't move or delete it after installing**; if you do move it, run the script again from the new location.
 
-**2. Trust the hooks in Codex:** start Codex, type `/hooks`, then review and trust the Agent Pet hooks. Codex doesn't run hooks you haven't trusted. You only need to do this once.
+</details>
 
-**3. Start a new Codex session** and the pet appears. The first launch also takes a minute or two to download Electron.
-
-Note: the hooks point at the directory you cloned, so **don't move or delete it after installing**. If you do move it, run `node scripts/install-codex.mjs` again from the new location.
+Use one method, not both: with the plugin and the script installed, every event reaches the pet twice. If you used the script before, run `node scripts/install-codex.mjs --uninstall` in that checkout first.
 
 You can use Claude Code and Codex at the same time; they drive the same pet. When sessions are in different states, the pet shows the most urgent one (waiting for permission > error > working > thinking > done > idle).
 
@@ -327,7 +342,17 @@ claude plugin update agent-pet@agent-pet
 
 Then quit the pet (tray → Quit) and start a new session. If the new version needs different dependencies, they're reinstalled automatically.
 
-**Update (Codex):** run `git pull` in the cloned directory, then quit the pet and start a new session.
+**Update (Codex):**
+
+```bash
+codex plugin marketplace upgrade agent-pet
+```
+
+```bash
+codex plugin add agent-pet@agent-pet
+```
+
+Then quit the pet, start a new session, and trust the updated hooks in `/hooks`. If you installed with the script, run `git pull` in the cloned directory instead.
 
 **Uninstall (Claude Code):**
 
@@ -339,7 +364,17 @@ claude plugin uninstall agent-pet@agent-pet
 claude plugin marketplace remove agent-pet
 ```
 
-**Uninstall (Codex):** run `node scripts/install-codex.mjs --uninstall` in the cloned directory, then delete the directory.
+**Uninstall (Codex):**
+
+```bash
+codex plugin remove agent-pet@agent-pet
+```
+
+```bash
+codex plugin marketplace remove agent-pet
+```
+
+If you installed with the script, run `node scripts/install-codex.mjs --uninstall` in the cloned directory instead, then delete the directory.
 
 After uninstalling you can delete the `~/.agent-pet` folder; it only holds settings and the app location.
 
@@ -354,7 +389,7 @@ After uninstalling you can delete the `~/.agent-pet` folder; it only holds setti
 ```
 plugin/    Claude Code plugin: hooks that forward lifecycle events (no npm dependencies); Codex reuses the same scripts
 app/       Electron + PlayCanvas + @viggle/splat-engine desktop pet
-scripts/   install-codex.mjs
+scripts/   install-codex.mjs (script install for Codex; the plugin route reads plugin/.codex-plugin and plugin/hooks/codex-hooks.json)
 docs/      Motion design: each motion's prompt, why that sample was picked, and the processing pipeline
 ```
 

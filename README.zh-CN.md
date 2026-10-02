@@ -54,9 +54,26 @@ claude plugin install agent-pet@agent-pet
 
 ## 安装到 Codex
 
-Codex 和 Claude Code 的 hook 格式相同，宠物复用同一套脚本。
+Codex 能读取 Claude Code 格式的插件，所以安装方式和 Claude Code 一样。
 
-**1. 克隆仓库并安装 hook：**
+**1. 在终端里添加 marketplace 并安装插件：**
+
+```bash
+codex plugin marketplace add jinshuming/agent-pet
+```
+
+```bash
+codex plugin add agent-pet@agent-pet
+```
+
+**2. 在 Codex 里信任这些 hook：** 启动 Codex，输入 `/hooks`，审阅并信任 Agent Pet 的 hook。Codex 不会运行没有被信任过的 hook，每个版本只需要做一次。
+
+**3. 开一个新的 Codex 会话**，宠物就会出现。第一次启动同样要等一两分钟下载 Electron。
+
+已在 Codex CLI 0.160 上测试。如果你的 Codex 还没有 `codex plugin` 命令，请先升级，或者改用安装脚本：
+
+<details>
+<summary>用脚本安装（旧版 Codex，或想直接从克隆的代码运行）</summary>
 
 ```bash
 git clone https://github.com/jinshuming/agent-pet.git
@@ -66,13 +83,11 @@ git clone https://github.com/jinshuming/agent-pet.git
 cd agent-pet && node scripts/install-codex.mjs
 ```
 
-安装脚本会把本仓库的 hook 合并进 `~/.codex/hooks.json`，不会动你已有的 hook。
+安装脚本会把本仓库的 hook 合并进 `~/.codex/hooks.json`，不会动你已有的 hook。然后同样在 `/hooks` 里信任它们。hook 指向你克隆下来的这个目录，**安装后不要移动或删除这个目录**；如果移动了，在新位置重新运行一次脚本即可。
 
-**2. 在 Codex 里信任这些 hook：** 启动 Codex，输入 `/hooks`，审阅并信任 Agent Pet 的 hook。Codex 不会运行没有被信任过的 hook，这一步只需要做一次。
+</details>
 
-**3. 开一个新的 Codex 会话**，宠物就会出现。第一次启动同样要等一两分钟下载 Electron。
-
-注意：hook 指向你克隆下来的这个目录，**安装后不要移动或删除这个目录**。如果移动了，在新位置重新运行一次 `node scripts/install-codex.mjs` 即可。
+两种方式只用一种：插件和脚本都装了的话，每个事件会发给宠物两次。如果之前用脚本装过，先在那个目录里运行 `node scripts/install-codex.mjs --uninstall`。
 
 Claude Code 和 Codex 可以同时用，它们驱动的是同一只宠物；几个会话状态不同时，显示最紧急的那个（等待授权 > 出错 > 工作中 > 思考中 > 完成 > 待机）。
 
@@ -311,7 +326,17 @@ claude plugin update agent-pet@agent-pet
 
 更新后退出宠物（托盘 → 退出），再开一个新会话。如果新版本需要不同的依赖，会自动重新安装。
 
-**更新（Codex）：** 在克隆的目录里运行 `git pull`，然后退出宠物、开新会话。
+**更新（Codex）：**
+
+```bash
+codex plugin marketplace upgrade agent-pet
+```
+
+```bash
+codex plugin add agent-pet@agent-pet
+```
+
+然后退出宠物、开新会话，并在 `/hooks` 里信任更新后的 hook。用脚本安装的，改为在克隆的目录里运行 `git pull`。
 
 **卸载（Claude Code）：**
 
@@ -323,7 +348,17 @@ claude plugin uninstall agent-pet@agent-pet
 claude plugin marketplace remove agent-pet
 ```
 
-**卸载（Codex）：** 在克隆的目录里运行 `node scripts/install-codex.mjs --uninstall`，然后删掉这个目录。
+**卸载（Codex）：**
+
+```bash
+codex plugin remove agent-pet@agent-pet
+```
+
+```bash
+codex plugin marketplace remove agent-pet
+```
+
+用脚本安装的，改为在克隆的目录里运行 `node scripts/install-codex.mjs --uninstall`，然后删掉这个目录。
 
 卸载后可以删掉 `~/.agent-pet` 文件夹，里面只有设置和 app 位置记录。
 
@@ -338,7 +373,7 @@ claude plugin marketplace remove agent-pet
 ```
 plugin/    Claude Code 插件：转发生命周期事件的 hook（没有 npm 依赖）；Codex 复用同一套脚本
 app/       Electron + PlayCanvas + @viggle/splat-engine 桌面宠物
-scripts/   install-codex.mjs
+scripts/   install-codex.mjs（用脚本安装到 Codex；插件方式读取 plugin/.codex-plugin 和 plugin/hooks/codex-hooks.json）
 docs/      动作设计：每个动作的提示词、选样理由和处理流程
 ```
 

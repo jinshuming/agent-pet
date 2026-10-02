@@ -99,7 +99,7 @@
 
 ### r/codex 或 r/OpenAI
 
-标题把 Claude Code 换成 Codex，正文第一段改成：「Works with Codex hooks: clone, run `node scripts/install-codex.mjs`, trust the hooks in `/hooks`.」
+标题把 Claude Code 换成 Codex，正文第一段改成：「Installs as a native Codex plugin: `codex plugin marketplace add jinshuming/agent-pet`, then `codex plugin add agent-pet@agent-pet`, then trust the hooks in `/hooks`.」
 
 ### r/ChatGPTCoding、r/LocalLLaMA（偏「接入任意 agent」）
 

@@ -1,0 +1,168 @@
+{
+  "description": "Forward Codex lifecycle events to the Agent Pet desktop app",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/launch.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\launch.mjs\"",
+            "async": true,
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/emit.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\emit.mjs\"",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/emit.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\emit.mjs\"",
+            "async": false,
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/emit.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\emit.mjs\"",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/emit.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\emit.mjs\"",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/emit.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\emit.mjs\"",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/emit.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\emit.mjs\"",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/emit.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\emit.mjs\"",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/emit.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\emit.mjs\"",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/emit.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\emit.mjs\"",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/emit.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\emit.mjs\"",
+            "async": true,
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/emit.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\emit.mjs\"",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/emit.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\emit.mjs\"",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

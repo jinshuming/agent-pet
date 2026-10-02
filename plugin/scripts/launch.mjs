@@ -3,7 +3,7 @@
 // The app is found via, in order: AGENT_PET_APP_DIR, the location the app
 // recorded in ~/.agent-pet/app.json the last time it ran, ../app next to this
 // plugin (a git checkout, --plugin-dir, or the Codex install script), or the
-// Claude Code marketplace clone. Set AGENT_PET_NO_LAUNCH=1 to never auto-start.
+// Claude Code or Codex marketplace clone. Set AGENT_PET_NO_LAUNCH=1 to never auto-start.
 //
 // The app's own scripts/start.mjs installs Electron on first run (a minute or two)
 // and launches it; this hook only finds it and hands off, so it returns at once.
@@ -32,6 +32,8 @@ const appDir = [
   join(here, '..', '..', 'app'),
   // `/plugin marketplace add <owner>/agent-pet` clones the whole repo here; the plugin itself runs from a cache copy.
   join(homedir(), '.claude', 'plugins', 'marketplaces', 'agent-pet', 'app'),
+  // `codex plugin marketplace add <owner>/agent-pet` clones it here, and also runs the plugin from a cache copy.
+  join(process.env.CODEX_HOME || join(homedir(), '.codex'), '.tmp', 'marketplaces', 'agent-pet', 'app'),
 ]
   .filter(Boolean)
   .map((d) => resolve(d))

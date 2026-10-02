@@ -1,0 +1,20 @@
+{
+  "name": "agent-pet",
+  "version": "0.3.0",
+  "description": "A 3D Gaussian-splat desktop pet that acts out what your coding agent (Claude Code or Codex) is doing.",
+  "keywords": [
+    "desktop-pet",
+    "hooks",
+    "gaussian-splat",
+    "companion",
+    "codex"
+  ],
+  "hooks": "./hooks/codex-hooks.json",
+  "interface": {
+    "displayName": "Agent Pet",
+    "shortDescription": "A 3D desktop pet that acts out what Codex is doing",
+    "longDescription": "A desktop pet that thinks, types, reads and runs commands along with Codex, pleads when Codex needs your approval, and collapses out of breath when the turn is done. Runs entirely on your machine.",
+    "developerName": "Shuming Jin",
+    "websiteURL": "https://github.com/jinshuming/agent-pet"
+  }
+}
